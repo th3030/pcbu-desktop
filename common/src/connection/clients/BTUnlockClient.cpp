@@ -96,6 +96,9 @@ void BTUnlockClient::ConnectThread() {
 
     fd_set fdSet{};
     FD_SET(m_ClientSocket, &fdSet);
+    struct timeval retryTimeout{};
+    retryTimeout.tv_sec = 3;
+
     struct timeval timeout{};
     timeout.tv_sec = (long)settings.clientSocketTimeout;
 
@@ -130,13 +133,15 @@ void BTUnlockClient::ConnectThread() {
             goto threadEnd;
         }
     }
-    if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &timeout) <= 0) {
-        spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
+
+    if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &retryTimeout) <= 0) {
+        spdlog::info("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
         if(numRetries < settings.clientConnectRetries && m_IsRunning) {
             SOCKET_CLOSE(m_ClientSocket);
             numRetries++;
             goto socketStart;
         }
+        spdlog::error("select() timed out or failed. (Code={})", SOCKET_LAST_ERROR);
         m_UnlockState = UnlockState::CONNECT_ERROR;
         goto threadEnd;
     }
