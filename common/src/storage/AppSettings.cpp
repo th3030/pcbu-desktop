@@ -34,7 +34,7 @@ PCBUAppStorage AppSettings::Get() {
         def.serverIP = "auto";
         def.serverPort = 43295;
         def.clientSocketTimeout = 30;
-        def.clientConnectRetries = 0;
+        def.clientConnectRetries = 10;
         def.waitForKeyPress = false;
         spdlog::info("Creating new app storage...");
         Save(def);
