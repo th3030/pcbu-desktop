@@ -44,7 +44,7 @@ jobs:
       - name: Upload x64
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.2.1
+          tag_name: v2.0.3
           files: |
             pkg/build/PCBioUnlock-Setup-x64.exe
 
@@ -76,7 +76,7 @@ jobs:
       - name: Upload arm64
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.2.1
+          tag_name: v2.0.3
           files: |
             pkg/build/PCBioUnlock-Setup-arm64.exe
 
@@ -93,7 +93,7 @@ jobs:
       - name: Upload
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.2.1
+          tag_name: v2.0.3
           files: |
             pkg/build/PCBioUnlock-x64.AppImage
 
@@ -113,7 +113,7 @@ jobs:
       - name: Upload
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.2.1
+          tag_name: v2.0.3
           files: |
             pkg/build/PCBioUnlock-arm64.AppImage
 
