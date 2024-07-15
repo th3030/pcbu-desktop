@@ -37,23 +37,14 @@ UnlockState BaseUnlockServer::PollResult() {
 
 bool BaseUnlockServer::SetSocketBlocking(SOCKET socket, bool isBlocking) {
 #ifdef WINDOWS
-    if(isBlocking) {
-        u_long mode = 0;
-        return ioctlsocket(socket, FIONBIO, &mode) == 0;
-    }
-    u_long mode = 1;
+    u_long mode = isBlocking ? 0 : 1;
     return ioctlsocket(socket, FIONBIO, &mode) == 0;
 #else
-    if(isBlocking) {
-        int flags = fcntl(socket, F_GETFL, 0);
-        if (flags == -1)
-            return false;
-        return fcntl(socket, F_SETFL, flags & ~O_NONBLOCK) != -1;
-    }
-    int flags = fcntl(socket, F_GETFL, 0);
-    if (flags == -1)
+    int oldFlags = fcntl(socket, F_GETFL, 0);
+    if (oldFlags == -1)
         return false;
-    return fcntl(socket, F_SETFL, flags | O_NONBLOCK) != -1;
+    auto flags = isBlocking ? (oldFlags & ~O_NONBLOCK) : (oldFlags | O_NONBLOCK);
+    return fcntl(socket, F_SETFL, flags) != -1;
 #endif
 }
 
@@ -64,10 +55,11 @@ Packet BaseUnlockServer::ReadPacket(SOCKET socket) {
     while (lenBytesRead < sizeof(uint16_t)) {
         int result = (int)read(socket, lenBuffer.data() + lenBytesRead, sizeof(uint16_t) - lenBytesRead);
         if (result <= 0) {
-            spdlog::error("Reading packet length failed.");
             auto error = GetPacketError(result, SOCKET_LAST_ERROR);
-            if(error != PacketError::NONE)
+            if(error != PacketError::NONE) {
+                spdlog::error("Reading packet length failed.");
                 return {GetPacketError(result, SOCKET_LAST_ERROR)};
+            }
         } else {
             lenBytesRead += result;
         }
@@ -87,10 +79,11 @@ Packet BaseUnlockServer::ReadPacket(SOCKET socket) {
     while (bytesRead < packetSize) {
         int result = (int)read(socket, buffer.data() + bytesRead, packetSize - bytesRead);
         if (result <= 0) {
-            spdlog::error("Reading packet data failed. (Len={})", packetSize);
             auto error = GetPacketError(result, SOCKET_LAST_ERROR);
-            if(error != PacketError::NONE)
+            if(error != PacketError::NONE) {
+                spdlog::error("Reading packet data failed. (Len={})", packetSize);
                 return {GetPacketError(result, SOCKET_LAST_ERROR)};
+            }
         } else {
             bytesRead += result;
         }
@@ -104,10 +97,11 @@ PacketError BaseUnlockServer::WritePacket(SOCKET socket, const std::vector<uint8
     while (bytesWritten < sizeof(uint16_t)) {
         int result = (int)write(socket, reinterpret_cast<const char*>(&packetSize) + bytesWritten, sizeof(uint16_t) - bytesWritten);
         if (result <= 0) {
-            spdlog::error("Writing packet data length failed.");
             auto error = GetPacketError(result, SOCKET_LAST_ERROR);
-            if(error != PacketError::NONE)
+            if(error != PacketError::NONE) {
+                spdlog::error("Writing packet data length failed.");
                 return error;
+            }
         } else {
             bytesWritten += result;
         }
@@ -116,10 +110,11 @@ PacketError BaseUnlockServer::WritePacket(SOCKET socket, const std::vector<uint8
     while (bytesWritten < data.size()) {
         int result = (int)write(socket, reinterpret_cast<const char*>(data.data()) + bytesWritten, (int)data.size() - bytesWritten);
         if (result <= 0) {
-            spdlog::error("Writing packet data failed. (Len={})", packetSize);
             auto error = GetPacketError(result, SOCKET_LAST_ERROR);
-            if(error != PacketError::NONE)
+            if(error != PacketError::NONE) {
+                spdlog::error("Writing packet data failed. (Len={})", packetSize);
                 return error;
+            }
         } else {
             bytesWritten += result;
         }
@@ -131,9 +126,12 @@ PacketError BaseUnlockServer::GetPacketError(int result, int error) {
     if(result == 0) {
         return PacketError::CLOSED_CONNECTION;
     } else {
-        if(error == SOCKET_ERROR_WOULD_BLOCK || error == SOCKET_ERROR_IN_PROGRESS)
+        if(error == SOCKET_ERROR_WOULD_BLOCK || error == SOCKET_ERROR_IN_PROGRESS || error == SOCKET_ERROR_TRY_AGAIN)
             return PacketError::NONE;
-        spdlog::error("Packet socket error. (Code={})", error);
+
+        spdlog::error("Socket operation failed. (Code={}, Str={})", error, strerror(error));
+        if(error == SOCKET_ERROR_CONNECT_REFUSED || error == SOCKET_ERROR_HOST_UNREACHABLE)
+            return PacketError::CLOSED_CONNECTION;
         if(error == SOCKET_ERROR_TIMEOUT)
             return PacketError::TIMEOUT;
     }
