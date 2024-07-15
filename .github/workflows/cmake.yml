@@ -2,7 +2,7 @@ name: CMake
 on:
   workflow_dispatch:
   push:
-    tags:
+    tags:s
       - "v*.*.*"
 
 permissions:
