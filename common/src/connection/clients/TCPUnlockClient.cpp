@@ -88,12 +88,13 @@ void TCPUnlockClient::ConnectThread() {
         }
     }
     if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &connectTimeout) <= 0) {
-        spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
+        spdlog::info("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
         if(numRetries < settings.clientConnectRetries && m_IsRunning) {
             SOCKET_CLOSE(m_ClientSocket);
             numRetries++;
             goto socketStart;
         }
+        spdlog::error("select() timed out or failed. (Code={})", SOCKET_LAST_ERROR);
         m_UnlockState = UnlockState::CONNECT_ERROR;
         goto threadEnd;
     }
