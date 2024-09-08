@@ -3,6 +3,8 @@
 #include "connection/SocketDefs.h"
 #include "platform/BluetoothHelper.h"
 #include "storage/AppSettings.h"
+#include <chrono>
+#include <thread>
 
 #ifdef WINDOWS
 #include <ws2bth.h>
@@ -94,12 +96,13 @@ void BTUnlockClient::ConnectThread() {
         m_UnlockState = UnlockState::UNK_ERROR;
         goto threadEnd;
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
     if(!SetSocketBlocking(m_ClientSocket, false)) {
         spdlog::error("Failed setting socket to non-blocking mode. (Code={})", SOCKET_LAST_ERROR);
         m_UnlockState = UnlockState::UNK_ERROR;
         goto threadEnd;
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     if(connect(m_ClientSocket, reinterpret_cast<struct sockaddr *>(&address), sizeof(address)) < 0) {
         auto error = SOCKET_LAST_ERROR;
         if(error != SOCKET_ERROR_IN_PROGRESS && error != SOCKET_ERROR_WOULD_BLOCK) {
@@ -108,13 +111,16 @@ void BTUnlockClient::ConnectThread() {
             goto threadEnd;
         }
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &connectTimeout) <= 0) {
-        spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
         if(numRetries < settings.clientConnectRetries && m_IsRunning) {
-            SOCKET_CLOSE(m_ClientSocket);
+            spdlog::info("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
             numRetries++;
+            SOCKET_CLOSE(m_ClientSocket);
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
             goto socketStart;
         }
+        spdlog::error("select() timed out or failed. (Code={})", SOCKET_LAST_ERROR);
         m_UnlockState = UnlockState::CONNECT_ERROR;
         goto threadEnd;
     }
