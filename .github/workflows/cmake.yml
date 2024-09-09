@@ -44,7 +44,7 @@ jobs:
       - name: Upload x64
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.8
+          tag_name: v2.0.81
           files: |
             pkg/build/PCBioUnlock-Setup-x64.exe
 
