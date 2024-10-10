@@ -30,6 +30,7 @@ public:
     PairedDevice GetDevice();
     UnlockResponseData GetResponseData();
     [[nodiscard]] bool HasClient() const;
+    bool IsRunning();
 
     void SetUnlockInfo(const std::string& authUser, const std::string& authProgram);
     UnlockState PollResult();
