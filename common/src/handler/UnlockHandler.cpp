@@ -104,6 +104,10 @@ UnlockResult UnlockHandler::GetResult(const std::string& authUser, const std::st
 }
 
 UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUnlockResult *currentResult, std::atomic<bool> *isRunning) {
+    uint32_t numConnectRetries = 0;
+    auto lastLogTime = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    auto settings = AppSettings::Get();
     if(!connection->Start()) {
         auto errorMsg = I18n::Get("error_start_handler");
         spdlog::error(errorMsg);
@@ -132,6 +136,16 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
         }
 
         state = connection->PollResult();
+        if(state == UnlockState::CONNECT_ERROR && numConnectRetries < settings.clientConnectRetries && connection->IsRunning()) {
+            m_PrintMessage(I18n::Get("unlock_error_connect_retry"));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            numConnectRetries++;
+
+            state = UnlockState::UNKNOWN;
+            startTime = Utils::GetCurrentTimeMs();
+            isWaitingForConnection = false;
+            isFutureCancel = false;
+        }
         if(state != UnlockState::UNKNOWN)
             break;
         if(!connection->HasClient() && Utils::GetCurrentTimeMs() - startTime > CRYPT_PACKET_TIMEOUT) {
@@ -147,7 +161,15 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
             m_PrintMessage(connectMessage);
             isWaitingForConnection = true;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if(state == UnlockState::CONNECT_ERROR) {
+        now = std::chrono::steady_clock::now();
+        if (now - lastLogTime < std::chrono::seconds(1)) {
+            m_PrintMessage(I18n::Get("unlock_error_netdown"));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            isFutureCancel = true;
+        }
     }
 
     connection->Stop();
