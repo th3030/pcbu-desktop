@@ -34,6 +34,10 @@ bool BaseUnlockConnection::HasClient() const {
     return m_HasConnection;
 }
 
+bool BaseUnlockConnection::IsRunning() {
+    return m_IsRunning;
+}
+
 UnlockState BaseUnlockConnection::PollResult() {
     return m_UnlockState;
 }
