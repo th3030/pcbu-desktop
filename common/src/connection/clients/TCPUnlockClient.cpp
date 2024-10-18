@@ -5,6 +5,7 @@
 
 #ifdef WINDOWS
 #include <Ws2tcpip.h>
+#define SHUT_RDWR SD_BOTH
 #else
 #include <arpa/inet.h>
 #endif
@@ -44,6 +45,7 @@ void TCPUnlockClient::Stop() {
 void TCPUnlockClient::ConnectThread() {
     uint32_t numRetries{};
     auto settings = AppSettings::Get();
+    int connectError = 0;
     spdlog::info("Connecting via TCP...");
 
     struct sockaddr_in serv_addr{};
@@ -57,6 +59,21 @@ void TCPUnlockClient::ConnectThread() {
     }
 
     socketStart:
+    if (m_UnlockState == UnlockState::CONNECT_ERROR) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        m_UnlockState = UnlockState::UNKNOWN;
+        connectError = 0;
+    }
+#ifdef WINDOWS
+    WSADATA wsa{};
+    if(numRetries > 0) {
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) { 
+            spdlog::error("WSAStartup failed.");
+            m_UnlockState = UnlockState::UNK_ERROR;
+            return; 
+        }
+    }
+#endif
     if ((m_ClientSocket = socket(AF_INET, SOCK_STREAM, 0)) == SOCKET_INVALID) {
         spdlog::error("socket() failed. (Code={})", SOCKET_LAST_ERROR);
         m_IsRunning = false;
@@ -67,8 +84,16 @@ void TCPUnlockClient::ConnectThread() {
     fd_set fdSet{};
     FD_SET(m_ClientSocket, &fdSet);
     struct timeval connectTimeout{};
-    connectTimeout.tv_sec = (long)settings.clientConnectTimeout;
-    if (!SetSocketRWTimeout(m_ClientSocket, settings.clientSocketTimeout)) {
+    long timeoutsec = (long)settings.clientConnectTimeout;
+    long timeoutusec = timeoutsec * 1000000;
+    timeoutusec = timeoutusec - 500000;
+    if (timeoutusec < 1000000) {
+        connectTimeout.tv_usec = timeoutusec;
+    } else {
+        connectTimeout.tv_sec = timeoutsec - 1;
+        connectTimeout.tv_usec = 500000;
+    }
+    if (!SetSocketRWTimeout(m_ClientSocket, settings.clientConnectTimeout)) {
         spdlog::error("Failed setting R/W timeout for socket. (Code={})", SOCKET_LAST_ERROR);
         m_UnlockState = UnlockState::UNK_ERROR;
         goto threadEnd;
@@ -87,11 +112,20 @@ void TCPUnlockClient::ConnectThread() {
             goto threadEnd;
         }
     }
+    std::this_thread::sleep_for(std::chrono::microseconds(500));
     if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &connectTimeout) <= 0) {
-        spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
         if(numRetries < settings.clientConnectRetries && m_IsRunning) {
+            shutdown(m_ClientSocket, SHUT_RDWR);
             SOCKET_CLOSE(m_ClientSocket);
             numRetries++;
+            if (connectError > 1) {
+                spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
+                m_UnlockState = UnlockState::CONNECT_ERROR;
+            }
+            connectError++;
+        #ifdef WINDOWS
+            WSACleanup();
+        #endif
             goto socketStart;
         }
         m_UnlockState = UnlockState::CONNECT_ERROR;
@@ -99,10 +133,20 @@ void TCPUnlockClient::ConnectThread() {
     }
 
     m_HasConnection = true;
+    if (!SetSocketRWTimeout(m_ClientSocket, settings.clientSocketTimeout)) {
+        spdlog::error("Failed setting R/W timeout for socket. (Code={})", SOCKET_LAST_ERROR);
+        m_UnlockState = UnlockState::UNK_ERROR;
+        goto threadEnd;
+    }
+    spdlog::info("Connection established!");
     PerformAuthFlow(m_ClientSocket);
 
     threadEnd:
     m_IsRunning = false;
     m_HasConnection = false;
+    shutdown(m_ClientSocket, SHUT_RDWR);
     SOCKET_CLOSE(m_ClientSocket);
+#ifdef WINDOWS 
+    WSACleanup();
+#endif
 }
