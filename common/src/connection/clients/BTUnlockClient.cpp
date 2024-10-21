@@ -8,6 +8,7 @@
 #include <ws2bth.h>
 #define AF_BLUETOOTH AF_BTH
 #define BTPROTO_RFCOMM BTHPROTO_RFCOMM
+#define SHUT_RDWR SD_BOTH
 #elif LINUX
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/rfcomm.h>
@@ -48,10 +49,18 @@ void BTUnlockClient::Stop() {
 void BTUnlockClient::ConnectThread() {
     uint32_t numRetries{};
     auto settings = AppSettings::Get();
+    int wouldBlockRetries = 0;
+    bool deviceConnect = false;
     spdlog::info("Connecting via BT...");
 
+    socketStart:
 #ifdef WINDOWS
-    GUID guid = { 0x62182bf7, 0x97c8, 0x45f9, { 0xaa, 0x2c, 0x53, 0xc5, 0xf2, 0x00, 0x8b, 0xdf } };
+    GUID guid;
+    if (!deviceConnect) {
+        guid = { 0x00001105, 0x0000, 0x1000, { 0x80, 0x00, 0x00, 0x80, 0x5f, 0x9b, 0x34, 0xfb } };
+    } else {
+        guid = { 0x62182bf7, 0x97c8, 0x45f9, { 0xaa, 0x2c, 0x53, 0xc5, 0xf2, 0x00, 0x8b, 0xdf } };
+    }
     BTH_ADDR addr;
     BluetoothHelper::str2ba(m_DeviceAddress.c_str(), &addr);
 
@@ -61,8 +70,16 @@ void BTUnlockClient::ConnectThread() {
     address.btAddr = addr;
 #elif LINUX
     // 62182bf7-97c8-45f9-aa2c-53c5f2008bdf
-    static uint8_t CHANNEL_UUID[16] = { 0x62, 0x18, 0x2b, 0xf7, 0x97, 0xc8,
+    static uint8_t CHANNEL_UUID[16];
+    if (!deviceConnect) {
+        uint8_t tmp[] = { 0x00, 0x00, 0x11, 0x05, 0x00, 0x00,
+                                        0x10, 0x00, 0x80, 0x00, 0x00, 0x80, 0x5f, 0x9b, 0x34, 0xfb };
+        memcpy(CHANNEL_UUID, tmp, sizeof(CHANNEL_UUID));
+    } else {
+        uint8_t tmp[] = { 0x62, 0x18, 0x2b, 0xf7, 0x97, 0xc8,
                                         0x45, 0xf9, 0xaa, 0x2c, 0x53, 0xc5, 0xf2, 0x00, 0x8b, 0xdf };
+        memcpy(CHANNEL_UUID, tmp, sizeof(CHANNEL_UUID));
+    }
 
     m_Channel = BluetoothHelper::FindSDPChannel(m_DeviceAddress, CHANNEL_UUID);
     if (m_Channel == -1) {
@@ -77,18 +94,164 @@ void BTUnlockClient::ConnectThread() {
     str2ba(m_DeviceAddress.c_str(), &address.rc_bdaddr);
 #endif
 
-    socketStart:
+    if (m_UnlockState == UnlockState::CONNECT_ERROR) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        m_UnlockState = UnlockState::UNKNOWN;
+        wouldBlockRetries = 0;
+    }
+#ifdef WINDOWS
+    WSADATA wsa{};
+    if(numRetries > 0) {
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) { 
+            spdlog::error("WSAStartup failed.");
+            return; 
+        }
+    }
+#endif
     if((m_ClientSocket = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM)) == SOCKET_INVALID) {
         spdlog::error("socket(AF_BLUETOOTH) failed. (Code={})", SOCKET_LAST_ERROR);
         m_IsRunning = false;
         m_UnlockState = UnlockState::UNK_ERROR;
         return;
     }
+#ifdef WINDOWS
+    auto lastLogTime = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    WSAEVENT event;
+    DWORD waitResult;
+    WSANETWORKEVENTS netEvents;
+    int timeout = (int)settings.clientConnectTimeout * 1000;
+    timeout = timeout - 500;
+    
+    // Create an event object for the socket
+    event = WSACreateEvent();
+    if (event == WSA_INVALID_EVENT) {
+        spdlog::error("WSACreateEvent failed");
+        m_UnlockState = UnlockState::UNK_ERROR;
+        goto threadEnd;
+    }
 
+    // Set the socket to non-blocking mode and associate it with the event
+    if (WSAEventSelect(m_ClientSocket, event, FD_CONNECT) == SOCKET_ERROR) {
+        spdlog::error("WSAEventSelect failed. (Code={})", SOCKET_LAST_ERROR);
+        shutdown(m_ClientSocket, SHUT_RDWR);
+        SOCKET_CLOSE(m_ClientSocket);
+        WSACloseEvent(event);
+        WSACleanup();
+        m_UnlockState = UnlockState::UNK_ERROR;
+        goto threadEnd;
+    }
+
+    // Initiate a connection
+    if (WSAConnect(m_ClientSocket, reinterpret_cast<sockaddr*>(&address), sizeof(address), nullptr, nullptr, nullptr, nullptr) == SOCKET_ERROR) {
+        if (SOCKET_LAST_ERROR != SOCKET_ERROR_IN_PROGRESS && SOCKET_LAST_ERROR != SOCKET_ERROR_WOULD_BLOCK) { // Non-blocking socket in progress
+            spdlog::error("WSAConnect failed. (Code={})", SOCKET_LAST_ERROR);
+            shutdown(m_ClientSocket, SHUT_RDWR);
+            SOCKET_CLOSE(m_ClientSocket);
+            WSACloseEvent(event);
+            WSACleanup();
+            m_UnlockState = UnlockState::CONNECT_ERROR;
+            goto threadEnd;
+        }
+    }
+
+    // Wait for the connection event (non-blocking)
+    waitResult = WSAWaitForMultipleEvents(1, &event, TRUE, timeout, FALSE);
+    if (waitResult == WSA_WAIT_TIMEOUT && numRetries < settings.clientConnectRetries && m_IsRunning && wouldBlockRetries < 2) {
+        if (wouldBlockRetries > 0 || numRetries > 0) {
+            spdlog::error("WSAWaitForMultipleEvents() timed out or failed. (Code={}, Retry={}, WouldBlockRetry={})", SOCKET_LAST_ERROR, numRetries, wouldBlockRetries);
+        }
+        if (SOCKET_LAST_ERROR == SOCKET_ERROR_WOULD_BLOCK) {
+            wouldBlockRetries++;
+        }
+        shutdown(m_ClientSocket, SHUT_RDWR);
+        SOCKET_CLOSE(m_ClientSocket);
+        WSACloseEvent(event);
+        WSACleanup();
+        numRetries++;
+        goto socketStart;
+    } else if (waitResult == WSA_WAIT_FAILED && SOCKET_LAST_ERROR != SOCKET_ERROR_IN_PROGRESS) {
+        spdlog::error("WSAWaitForMultipleEvents() failed. (Code={})", SOCKET_LAST_ERROR);
+        shutdown(m_ClientSocket, SHUT_RDWR);
+        SOCKET_CLOSE(m_ClientSocket);
+        WSACloseEvent(event);
+        WSACleanup();
+        m_UnlockState = UnlockState::UNK_ERROR;
+        goto threadEnd;
+    }
+
+    // If the computer can see the phone but the phone hangs with the connection abort the connection.
+    if (wouldBlockRetries > 1) {
+        spdlog::error("Device connection is hanging. (Code={})", SOCKET_LAST_ERROR);
+        shutdown(m_ClientSocket, SHUT_RDWR);
+        SOCKET_CLOSE(m_ClientSocket);
+        WSACloseEvent(event);
+        WSACleanup();
+        m_UnlockState = UnlockState::CONNECT_ERROR;
+        goto socketStart;
+    }
+
+    // Check what kind of event occurred
+    if (WSAEnumNetworkEvents(m_ClientSocket, event, &netEvents) == SOCKET_ERROR) {
+        spdlog::error("WSAEnumNetworkEvents failed. (Code={})", SOCKET_LAST_ERROR);
+        shutdown(m_ClientSocket, SHUT_RDWR);
+        SOCKET_CLOSE(m_ClientSocket);
+        WSACloseEvent(event);
+        WSACleanup();
+        m_UnlockState = UnlockState::UNK_ERROR;
+        goto threadEnd;
+    }
+
+    // Check for successful connection
+    if (netEvents.lNetworkEvents & FD_CONNECT) {
+        if (netEvents.iErrorCode[FD_CONNECT_BIT] == 0) {
+            if (!deviceConnect) {        
+                deviceConnect = true;
+                spdlog::info("OPP connection successfull!");
+                shutdown(m_ClientSocket, SHUT_RDWR);
+                SOCKET_CLOSE(m_ClientSocket);
+                WSACloseEvent(event);
+                WSACleanup();
+                goto socketStart;
+            } else {
+                spdlog::info("Connection established!");
+            }
+        } else {
+            now = std::chrono::steady_clock::now();
+            if (now - lastLogTime > std::chrono::milliseconds(timeout) || numRetries == 0) {
+                spdlog::error("Connection failed. (Code={}, Retry={})", netEvents.iErrorCode[FD_CONNECT_BIT], numRetries);
+                lastLogTime = now;  // Update the time of last log
+            }
+            if (netEvents.iErrorCode[FD_CONNECT_BIT] == SOCKET_ERROR_WOULD_BLOCK || netEvents.iErrorCode[FD_CONNECT_BIT] == WSAEADDRINUSE || netEvents.iErrorCode[FD_CONNECT_BIT] == WSAEADDRNOTAVAIL || netEvents.iErrorCode[FD_CONNECT_BIT] == SOCKET_ERROR_TIMEOUT) {
+                if (numRetries < settings.clientConnectRetries && m_IsRunning) {
+                    shutdown(m_ClientSocket, SHUT_RDWR);
+                    SOCKET_CLOSE(m_ClientSocket);
+                    WSACloseEvent(event);
+                    WSACleanup();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    if (numRetries == 0){
+                        numRetries++;
+                    }
+                    goto socketStart;
+                }
+            }
+            m_UnlockState = UnlockState::CONNECT_ERROR;
+            goto threadEnd;
+        }
+    }
+#else
     fd_set fdSet{};
     FD_SET(m_ClientSocket, &fdSet);
     struct timeval connectTimeout{};
-    connectTimeout.tv_sec = (long)settings.clientConnectTimeout;
+    long timeoutsec = (long)settings.clientConnectTimeout;
+    long timeoutusec = timeoutsec * 1000000;
+    timeoutusec = timeoutusec - 500000;
+    if (timeoutusec < 1000000) {
+        connectTimeout.tv_usec = timeoutusec;
+    } else {
+        connectTimeout.tv_sec = timeoutsec - 1;
+        connectTimeout.tv_usec = 500000;
+    }
     if (!SetSocketRWTimeout(m_ClientSocket, settings.clientSocketTimeout)) {
         spdlog::error("Failed setting R/W timeout for socket. (Code={})", SOCKET_LAST_ERROR);
         m_UnlockState = UnlockState::UNK_ERROR;
@@ -108,16 +271,33 @@ void BTUnlockClient::ConnectThread() {
             goto threadEnd;
         }
     }
+    std::this_thread::sleep_for(std::chrono::microseconds(500));
     if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &connectTimeout) <= 0) {
-        spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
         if(numRetries < settings.clientConnectRetries && m_IsRunning) {
+            shutdown(m_ClientSocket, SHUT_RDWR);
             SOCKET_CLOSE(m_ClientSocket);
             numRetries++;
+            if (wouldBlockRetries > 1) {
+                spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
+                m_UnlockState = UnlockState::CONNECT_ERROR;
+            }
+            wouldBlockRetries++;
             goto socketStart;
         }
         m_UnlockState = UnlockState::CONNECT_ERROR;
         goto threadEnd;
     }
+    
+    if(!deviceConnect) {
+        deviceConnect = true;
+        spdlog::info("OPP connection successfull!");
+        shutdown(m_ClientSocket, SHUT_RDWR);
+        SOCKET_CLOSE(m_ClientSocket);
+        goto socketStart;
+    } else {
+        spdlog::info("Connection established!");
+    }
+#endif
 
     m_HasConnection = true;
     PerformAuthFlow(m_ClientSocket);
@@ -125,5 +305,10 @@ void BTUnlockClient::ConnectThread() {
     threadEnd:
     m_IsRunning = false;
     m_HasConnection = false;
+    shutdown(m_ClientSocket, SHUT_RDWR);
     SOCKET_CLOSE(m_ClientSocket);
+#ifdef WINDOWS
+    WSACloseEvent(event);
+    WSACleanup();
+#endif
 }
