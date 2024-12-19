@@ -2,14 +2,19 @@
 
 #include "utils/StringUtils.h"
 
+bool BaseUnlockConnection::hasConnected = false;
+bool BaseUnlockConnection::hasSuccConnected = false;
+
 BaseUnlockConnection::BaseUnlockConnection() {
     m_UnlockToken = StringUtils::RandomString(64);
     m_UnlockState = UnlockState::UNKNOWN;
+    m_SecondServer = false;
 }
 
 BaseUnlockConnection::BaseUnlockConnection(const PairedDevice& device)
     : BaseUnlockConnection() {
     m_PairedDevice = device;
+    m_SecondServer = false;
 }
 
 BaseUnlockConnection::~BaseUnlockConnection() {
@@ -34,6 +39,14 @@ bool BaseUnlockConnection::HasClient() const {
     return m_HasConnection;
 }
 
+bool BaseUnlockConnection::IsRunning() {
+    return m_IsRunning;
+}
+
+bool BaseUnlockConnection::isSecondServer() {
+    return m_SecondServer;
+}
+
 UnlockState BaseUnlockConnection::PollResult() {
     return m_UnlockState;
 }
@@ -44,9 +57,14 @@ void BaseUnlockConnection::PerformAuthFlow(SOCKET socket) {
         m_UnlockState = UnlockState::UNK_ERROR;
         return;
     }
+    
+    if(hasConnected)
+        hasConnected = false;
+
     auto writeResult = WritePacket(socket, {serverDataStr.begin(), serverDataStr.end()});
     if(writeResult == PacketError::NONE) {
         auto responsePacket = ReadPacket(socket);
+        hasConnected = true;
         OnResponseReceived(responsePacket);
     } else {
         switch (writeResult) {
@@ -146,6 +164,7 @@ void BaseUnlockConnection::OnResponseReceived(const Packet& packet) {
 
         m_ResponseData = response;
         if(response.unlockToken == m_UnlockToken) {
+            hasSuccConnected = true;
             m_UnlockState = UnlockState::SUCCESS;
         } else {
             m_UnlockState = UnlockState::UNK_ERROR;
