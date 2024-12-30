@@ -25,6 +25,7 @@
 #include <sys/socket.h>
 #include <sys/fcntl.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 
 #define WSA_STARTUP
 
