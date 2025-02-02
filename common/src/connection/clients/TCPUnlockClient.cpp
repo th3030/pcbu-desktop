@@ -5,6 +5,7 @@
 
 #ifdef WINDOWS
 #include <Ws2tcpip.h>
+#include "../../natives/win-pcbiounlock/src/CUnlockCredential.h"
 #else
 #include <arpa/inet.h>
 #endif
@@ -44,8 +45,20 @@ void TCPUnlockClient::Stop() {
 void TCPUnlockClient::ConnectThread() {
     uint32_t numRetries{};
     auto settings = AppSettings::Get();
+    int connectError = 0;
+    int allowedToLog = 0;
+    int optionTrue = 1;
     spdlog::info("Connecting via TCP...");
+    if(hasConnected)
+        hasConnected = false;
+    if(hasSuccConnected)
+        hasSuccConnected = false;
+#ifdef WINDOWS
+    if(CUnlockCredential::isDeselectedSwitch)
+        CUnlockCredential::isDeselectedSwitch = false;
+#endif
 
+    socketStart:
     struct sockaddr_in serv_addr{};
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons((u_short)m_Port);
@@ -56,7 +69,12 @@ void TCPUnlockClient::ConnectThread() {
         return;
     }
 
-    socketStart:
+    if (m_UnlockState == UnlockState::CONNECT_ERROR) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        m_UnlockState = UnlockState::UNKNOWN;
+        connectError = 0;
+    }
+    
     if ((m_ClientSocket = socket(AF_INET, SOCK_STREAM, 0)) == SOCKET_INVALID) {
         spdlog::error("socket() failed. (Code={})", SOCKET_LAST_ERROR);
         m_IsRunning = false;
@@ -68,7 +86,20 @@ void TCPUnlockClient::ConnectThread() {
     FD_SET(m_ClientSocket, &fdSet);
     struct timeval connectTimeout{};
     connectTimeout.tv_sec = (long)settings.clientConnectTimeout;
-    if (!SetSocketRWTimeout(m_ClientSocket, settings.clientSocketTimeout)) {
+
+    if(setsockopt(m_ClientSocket, SOL_SOCKET, TCP_NODELAY, (char*)&optionTrue, sizeof(optionTrue)) < 0) {
+        spdlog::error("Failed setting no delay for socket. (Code={})", SOCKET_LAST_ERROR);
+        m_UnlockState = UnlockState::UNK_ERROR;
+        goto threadEnd;
+    }
+
+    if(setsockopt(m_ClientSocket, SOL_SOCKET, SO_KEEPALIVE, (char*)&optionTrue, sizeof(optionTrue)) < 0) {
+        spdlog::error("Failed setting keep alive for socket. (Code={})", SOCKET_LAST_ERROR);
+        m_UnlockState = UnlockState::UNK_ERROR;
+        goto threadEnd;
+    }
+    
+    if(!SetSocketRWTimeout(m_ClientSocket, settings.clientSocketTimeout)) {
         spdlog::error("Failed setting R/W timeout for socket. (Code={})", SOCKET_LAST_ERROR);
         m_UnlockState = UnlockState::UNK_ERROR;
         goto threadEnd;
@@ -88,10 +119,20 @@ void TCPUnlockClient::ConnectThread() {
         }
     }
     if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &connectTimeout) <= 0) {
-        spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
-        if(numRetries < settings.clientConnectRetries && m_IsRunning) {
+        if(numRetries < settings.clientConnectRetries && m_IsRunning && connectError < allowedToLog + 1) {
+            if(numRetries >= allowedToLog) {
+                spdlog::error("select() timed out or failed. (Code={}, Retry={}, ConnectError={})", SOCKET_LAST_ERROR, numRetries, connectError);
+            }
             SOCKET_CLOSE(m_ClientSocket);
             numRetries++;
+            connectError++;
+            goto socketStart;
+        }
+
+        if (connectError > allowedToLog && numRetries < settings.clientConnectRetries) {
+            spdlog::error("Device connection is hanging. (Code={})", SOCKET_LAST_ERROR);
+            SOCKET_CLOSE(m_ClientSocket);
+            m_UnlockState = UnlockState::CONNECT_ERROR;
             goto socketStart;
         }
         m_UnlockState = UnlockState::CONNECT_ERROR;
@@ -99,6 +140,7 @@ void TCPUnlockClient::ConnectThread() {
     }
 
     m_HasConnection = true;
+    spdlog::info("Connection established!");
     PerformAuthFlow(m_ClientSocket);
 
     threadEnd:
