@@ -3,11 +3,11 @@
 #include "StringUtils.h"
 
 std::string AppInfo::GetVersion() {
-    return "2.0.10";
+    return "2.1.0";
 }
 
 std::string AppInfo::GetProtocolVersion() {
-    return "1.3.0";
+    return "1.4.0";
 }
 
 std::string AppInfo::GetOperatingSystem() {

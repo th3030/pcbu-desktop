@@ -1,16 +1,19 @@
-#include "I18n.h"
+#include "QtI18n.h"
 
 #include <nlohmann/json.hpp>
 
 #include "ResourceHelper.h"
 #include "utils/LocaleHelper.h"
 
-std::string I18n::Get(const std::string &key) {
+std::string QtI18n::Get(const std::string &key) {
     try {
         std::string i18nPath{};
         switch (LocaleHelper::GetUserLocale()) {
             case LocaleHelper::Locale::GERMAN:
                 i18nPath = ":/res/i18n/de_DE.json";
+                break;
+            case LocaleHelper::Locale::CHINESE_SIMPLIFIED:
+                i18nPath = ":/res/i18n/zh_CN.json";
                 break;
             case LocaleHelper::Locale::ENGLISH:
             default:
@@ -28,4 +31,3 @@ std::string I18n::Get(const std::string &key) {
     }
     return key;
 }
-
