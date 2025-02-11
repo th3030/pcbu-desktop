@@ -81,9 +81,9 @@ void BTUnlockClient::ConnectThread() {
     socketStart:
     if(m_OtherClient) {
         int counter = 0;
-        auto timeoutVal = std::chrono::milliseconds(750);
+        auto timeoutVal = std::chrono::milliseconds(1000);
         while (!hasConnected) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            std::this_thread::sleep_for(std::chrono::milliseconds(2000));
             now = std::chrono::steady_clock::now();
             if(now - lastLogTime > timeoutVal) {
                 break;
@@ -313,7 +313,7 @@ void BTUnlockClient::ConnectThread() {
 #ifdef WINDOWS
     if(!clientHasConnected && CUnlockCredential::isDeselectedSwitch) {
         clientHasConnected = true;
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1750));
         goto socketStart;
     }
 #endif
