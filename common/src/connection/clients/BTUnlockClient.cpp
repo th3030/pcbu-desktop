@@ -17,7 +17,6 @@
 
 bool BTUnlockClient::isAlreadyConnected = false;
 #ifdef WINDOWS
-bool BTUnlockClient::clientHasConnected = false;
 bool BTUnlockClient::restartPending = false;
 #endif
 
@@ -28,6 +27,7 @@ BTUnlockClient::BTUnlockClient(const std::string& deviceAddress, const PairedDev
     m_ClientSocket = (SOCKET)-1;
     m_IsRunning = false;
     m_OtherClient = otherClient;
+    clientHasConnected = false;
 }
 
 bool BTUnlockClient::Start() {
@@ -294,9 +294,15 @@ void BTUnlockClient::ConnectThread() {
             if(hasSuccConnected) {
                 hasSuccConnected = false;
                 m_UnlockState = UnlockState::CANCELED;
+                SOCKET_CLOSE(m_ClientSocket);
                 goto threadEnd;
             }
     #ifdef WINDOWS
+        } else if(!clientHasConnected) {
+            clientHasConnected = true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1750));
+            SOCKET_CLOSE(m_ClientSocket);
+            goto socketStart;
         }
     #endif
     }
@@ -310,12 +316,5 @@ void BTUnlockClient::ConnectThread() {
     m_IsRunning = false;
     m_HasConnection = false;
     isAlreadyConnected = false;
-#ifdef WINDOWS
-    if(!clientHasConnected && CUnlockCredential::isDeselectedSwitch) {
-        clientHasConnected = true;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1750));
-        goto socketStart;
-    }
-#endif
     SOCKET_CLOSE(m_ClientSocket);
 }

@@ -19,9 +19,9 @@ private:
     int m_Channel;
     SOCKET m_ClientSocket;
     std::string m_DeviceAddress;
+    bool clientHasConnected;
     static bool isAlreadyConnected;
 #ifdef WINDOWS
-    static bool clientHasConnected;
     static bool restartPending;
 #endif
 };
