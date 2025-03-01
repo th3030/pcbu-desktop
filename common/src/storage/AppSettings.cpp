@@ -49,7 +49,7 @@ PCBUAppStorage AppSettings::Get() {
         def.unlockServerPort = 43296;
         def.clientSocketTimeout = 120;
         def.clientConnectTimeout = 5;
-        def.clientConnectRetries = 2;
+        def.clientConnectRetries = 12;
         def.waitForKeyPress = false;
         def.isManualUnlockEnabled = false;
         spdlog::info("Creating new app storage...");
