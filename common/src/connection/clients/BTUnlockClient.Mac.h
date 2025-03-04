@@ -5,7 +5,7 @@
 
 class BTUnlockClient : public BaseUnlockConnection {
 public:
-    BTUnlockClient(const std::string& deviceAddress, const PairedDevice& device);
+    BTUnlockClient(const std::string& deviceAddress, const PairedDevice& device, const bool &otherClient);
 
     bool Start() override;
     void Stop() override;
