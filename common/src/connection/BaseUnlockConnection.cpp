@@ -2,14 +2,18 @@
 
 #include "utils/StringUtils.h"
 
+bool BaseUnlockConnection::hasConnected = false;
+
 BaseUnlockConnection::BaseUnlockConnection() {
     m_UnlockToken = StringUtils::RandomString(64);
     m_UnlockState = UnlockState::UNKNOWN;
+    m_OtherClient = false;
 }
 
 BaseUnlockConnection::BaseUnlockConnection(const PairedDevice& device)
     : BaseUnlockConnection() {
     m_PairedDevice = device;
+    m_OtherClient = false;
 }
 
 BaseUnlockConnection::~BaseUnlockConnection() {
@@ -34,6 +38,14 @@ bool BaseUnlockConnection::HasClient() const {
     return m_HasConnection;
 }
 
+bool BaseUnlockConnection::IsRunning() {
+    return m_IsRunning;
+}
+
+bool BaseUnlockConnection::isSecondServer() {
+    return m_OtherClient;
+}
+
 UnlockState BaseUnlockConnection::PollResult() {
     return m_UnlockState;
 }
@@ -44,7 +56,12 @@ void BaseUnlockConnection::PerformAuthFlow(SOCKET socket) {
         m_UnlockState = UnlockState::UNK_ERROR;
         return;
     }
+    
+    if(hasConnected)
+        hasConnected = false;
+
     auto writeResult = WritePacket(socket, {serverDataStr.begin(), serverDataStr.end()});
+    hasConnected = true;
     if(writeResult == PacketError::NONE) {
         auto responsePacket = ReadPacket(socket);
         OnResponseReceived(responsePacket);
