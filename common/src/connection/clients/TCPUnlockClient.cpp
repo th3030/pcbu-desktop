@@ -5,6 +5,7 @@
 
 #ifdef WINDOWS
 #include <Ws2tcpip.h>
+#include "../../natives/win-pcbiounlock/src/CUnlockCredential.h"
 #else
 #include <arpa/inet.h>
 #endif
@@ -44,7 +45,14 @@ void TCPUnlockClient::Stop() {
 void TCPUnlockClient::ConnectThread() {
     uint32_t numRetries{};
     auto settings = AppSettings::Get();
+    int optionTrue = 1;
     spdlog::info("Connecting via TCP...");
+    if(hasConnected)
+        hasConnected = false;
+    #ifdef WINDOWS
+    if(CUnlockCredential::isDeselectedSwitch)
+        CUnlockCredential::isDeselectedSwitch = false;
+    #endif
 
     struct sockaddr_in serv_addr{};
     serv_addr.sin_family = AF_INET;
@@ -68,6 +76,18 @@ void TCPUnlockClient::ConnectThread() {
     FD_SET(m_ClientSocket, &fdSet);
     struct timeval connectTimeout{};
     connectTimeout.tv_sec = (long)settings.clientConnectTimeout;
+    if(setsockopt(m_ClientSocket, SOL_SOCKET, TCP_NODELAY, (char*)&optionTrue, sizeof(optionTrue)) < 0) {
+        spdlog::error("Failed setting no delay for socket. (Code={})", SOCKET_LAST_ERROR);
+        m_UnlockState = UnlockState::UNK_ERROR;
+        goto threadEnd;
+    }
+    
+    if(setsockopt(m_ClientSocket, SOL_SOCKET, SO_KEEPALIVE, (char*)&optionTrue, sizeof(optionTrue)) < 0) {
+        spdlog::error("Failed setting keep alive for socket. (Code={})", SOCKET_LAST_ERROR);
+        m_UnlockState = UnlockState::UNK_ERROR;
+        goto threadEnd;
+    }
+
     if (!SetSocketRWTimeout(m_ClientSocket, settings.clientSocketTimeout)) {
         spdlog::error("Failed setting R/W timeout for socket. (Code={})", SOCKET_LAST_ERROR);
         m_UnlockState = UnlockState::UNK_ERROR;
