@@ -15,6 +15,9 @@
 #include "guid.h"
 #include "utils/StringUtils.h"
 
+bool CUnlockCredential::isDeselectedSwitch = false;
+int CUnlockCredential::deselectedCount = 0;
+
 CUnlockCredential::CUnlockCredential():
     _cRef(1),
     _pCredProvCredentialEvents(nullptr),
@@ -189,6 +192,8 @@ HRESULT CUnlockCredential::SetSelected(_Out_ BOOL *pbAutoLogon)
 // is to clear out the password field.
 HRESULT CUnlockCredential::SetDeselected()
 {
+    isDeselectedSwitch = true;
+    deselectedCount++;
     _isSelected = false;
     if(_pUnlockListener != nullptr)
     {
