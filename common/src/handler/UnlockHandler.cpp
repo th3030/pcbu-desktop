@@ -20,6 +20,8 @@
 #define KEY_LEFTALT kVK_Option
 #endif
 
+bool UnlockHandler::secondClientConnectedFirst = false;
+
 UnlockHandler::UnlockHandler(const std::function<void(std::string)>& printMessage) {
     m_PrintMessage = printMessage;
 }
@@ -29,16 +31,20 @@ UnlockResult UnlockHandler::GetResult(const std::string& authUser, const std::st
     auto netIf = NetworkHelper::GetSavedNetworkInterface();
     auto devices = PairedDevicesStorage::GetDevicesForUser(authUser);
     auto enableManualUnlock = settings.isManualUnlockEnabled;
+    if(secondClientConnectedFirst)
+        secondClientConnectedFirst = false;
 
     std::vector<BaseUnlockConnection *> connections{};
     for(const auto& device : devices) {
         BaseUnlockConnection *connection{};
+        BaseUnlockConnection *btConnection{};
         switch (device.pairingMethod) {
             case PairingMethod::TCP:
-                connection = new TCPUnlockClient(device.ipAddress, device.serverPort, device);
+                connection = new TCPUnlockClient(device.ipAddress, 43298, device);
                 break;
             case PairingMethod::BLUETOOTH:
-                connection = new BTUnlockClient(device.bluetoothAddress, device);
+                connection = new BTUnlockClient(device.bluetoothAddress, device, false);
+                btConnection = new BTUnlockClient(device.bluetoothAddress, device, true);
                 break;
             case PairingMethod::CLOUD_TCP:
                 enableManualUnlock = true;
@@ -50,6 +56,10 @@ UnlockResult UnlockHandler::GetResult(const std::string& authUser, const std::st
         }
         connection->SetUnlockInfo(authUser, authProgram);
         connections.emplace_back(connection);
+        if(btConnection) {
+            btConnection->SetUnlockInfo(authUser, authProgram);
+            connections.emplace_back(btConnection);
+        }
     }
     if(!devices.empty() && enableManualUnlock) {
         auto server = new TCPUnlockServer();
@@ -73,6 +83,9 @@ UnlockResult UnlockHandler::GetResult(const std::string& authUser, const std::st
     for (auto connection : connections) {
         threads.emplace_back([this, connection, numServers, isRunning, &currentResult, &completed, &cv, &mutex]() {
             auto serverResult = RunServer(connection, &currentResult, isRunning);
+            if(connection->isSecondServer()){
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
             completed.fetch_add(1);
             if(serverResult.state == UnlockState::SUCCESS)
                 currentResult.store(serverResult);
@@ -103,6 +116,8 @@ UnlockResult UnlockHandler::GetResult(const std::string& authUser, const std::st
 }
 
 UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUnlockResult *currentResult, std::atomic<bool> *isRunning) {
+    auto lastLogTime = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
     if(!connection->Start()) {
         auto errorMsg = I18n::Get("error_start_handler");
         spdlog::error(errorMsg);
@@ -111,7 +126,9 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
     }
 
     auto connectMessage = I18n::Get(connection->IsServer() ? "wait_server_phone_connect" : "wait_client_phone_connect");
-    m_PrintMessage(connectMessage);
+    if(!connection->isSecondServer()) {
+        m_PrintMessage(connectMessage);
+    }
     auto keyScanner = KeyScanner();
     keyScanner.Start();
 
@@ -126,11 +143,29 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
             break;
         }
         if(connection->HasClient() && isWaitingForConnection) {
+            if(connection->isSecondServer())
+                secondClientConnectedFirst = true;
             m_PrintMessage(I18n::Get("wait_phone_unlock"));
             isWaitingForConnection = false;
         }
+        if(!connection->isSecondServer() && secondClientConnectedFirst) {
+            m_PrintMessage(I18n::Get("wait_phone_unlock"));
+        }
 
         state = connection->PollResult();
+        if(state == UnlockState::CONNECT_ERROR && connection->IsRunning()) {
+            if(!connection->isSecondServer() && !secondClientConnectedFirst) {
+                m_PrintMessage(I18n::Get("unlock_error_connect_retry"));
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2250));
+            if(!connection->isSecondServer() && !secondClientConnectedFirst)
+                m_PrintMessage(connectMessage);
+
+            state = UnlockState::UNKNOWN;
+            startTime = Utils::GetCurrentTimeMs();
+            isWaitingForConnection = true;
+            isFutureCancel = false;
+        }
         if(state != UnlockState::UNKNOWN)
             break;
         if(!connection->HasClient() && Utils::GetCurrentTimeMs() - startTime > CRYPT_PACKET_TIMEOUT) {
@@ -143,10 +178,21 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
         }
 
         if(!connection->HasClient() && !isWaitingForConnection) {
-            m_PrintMessage(connectMessage);
+            if(!connection->isSecondServer() && !secondClientConnectedFirst)
+                m_PrintMessage(connectMessage);
             isWaitingForConnection = true;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    if(connection->isSecondServer() && secondClientConnectedFirst)
+        secondClientConnectedFirst = false;
+    if(state == UnlockState::CONNECT_ERROR) {
+        now = std::chrono::steady_clock::now();
+        if (now - lastLogTime < std::chrono::seconds(1)) {
+            m_PrintMessage(I18n::Get("unlock_error_netdown"));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            isFutureCancel = true;
+        }
     }
 
     connection->Stop();
