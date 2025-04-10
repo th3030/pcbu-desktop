@@ -5,6 +5,7 @@
 
 #ifdef WINDOWS
 #include <Ws2tcpip.h>
+#include "../../natives/win-pcbiounlock/src/CUnlockCredential.h"
 #else
 #include <arpa/inet.h>
 #endif
@@ -45,6 +46,14 @@ void TCPUnlockClient::ConnectThread() {
     uint32_t numRetries{};
     auto settings = AppSettings::Get();
     spdlog::info("Connecting via TCP...");
+    if(hasConnected)
+        hasConnected = false;
+    if(hasSuccConnected)
+        hasSuccConnected = false;
+    #ifdef WINDOWS
+    if(CUnlockCredential::isDeselectedSwitch)
+        CUnlockCredential::isDeselectedSwitch = false;
+    #endif
 
     struct sockaddr_in serv_addr{};
     serv_addr.sin_family = AF_INET;
