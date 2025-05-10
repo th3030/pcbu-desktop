@@ -63,7 +63,7 @@
 }
 @end
 
-BTUnlockClient::BTUnlockClient(const std::string& deviceAddress, const PairedDevice& device)
+BTUnlockClient::BTUnlockClient(const std::string& deviceAddress, const PairedDevice& device, const int &otherClient)
         : BaseUnlockConnection(device) {
     #warning WIP // ToDo
     m_Wrapper = [[BTUnlockClientWrapper alloc] initWithAddress:[NSString stringWithCString:deviceAddress.c_str() encoding:NSUTF8StringEncoding]];
