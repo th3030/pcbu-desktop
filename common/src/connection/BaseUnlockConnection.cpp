@@ -1,15 +1,23 @@
 #include "BaseUnlockConnection.h"
 
 #include "utils/StringUtils.h"
+#ifdef WINDOWS
+#include "../../natives/win-pcbiounlock/src/CUnlockCredential.h"
+#endif
+
+bool BaseUnlockConnection::hasConnected = false;
+bool BaseUnlockConnection::hasSuccConnected = false;
 
 BaseUnlockConnection::BaseUnlockConnection() {
     m_UnlockToken = StringUtils::RandomString(64);
     m_UnlockState = UnlockState::UNKNOWN;
+    m_OtherClient = 0;
 }
 
 BaseUnlockConnection::BaseUnlockConnection(const PairedDevice& device)
     : BaseUnlockConnection() {
     m_PairedDevice = device;
+    m_OtherClient = 0;
 }
 
 BaseUnlockConnection::~BaseUnlockConnection() {
@@ -34,6 +42,14 @@ bool BaseUnlockConnection::HasClient() const {
     return m_HasConnection;
 }
 
+bool BaseUnlockConnection::IsRunning() {
+    return m_IsRunning;
+}
+
+int BaseUnlockConnection::getClientNumber() {
+    return m_OtherClient;
+}
+
 UnlockState BaseUnlockConnection::PollResult() {
     return m_UnlockState;
 }
@@ -45,8 +61,13 @@ void BaseUnlockConnection::PerformAuthFlow(SOCKET socket) {
         return;
     }
     auto writeResult = WritePacket(socket, {serverDataStr.begin(), serverDataStr.end()});
+    hasConnected = true;
     if(writeResult == PacketError::NONE) {
         auto responsePacket = ReadPacket(socket);
+    #ifdef WINDOWS
+        if(CUnlockCredential::isDeselectedSwitch)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    #endif
         OnResponseReceived(responsePacket);
     } else {
         switch (writeResult) {
@@ -146,6 +167,8 @@ void BaseUnlockConnection::OnResponseReceived(const Packet& packet) {
 
         m_ResponseData = response;
         if(response.unlockToken == m_UnlockToken) {
+            hasSuccConnected = true;
+            hasConnected = false;
             m_UnlockState = UnlockState::SUCCESS;
         } else {
             m_UnlockState = UnlockState::UNK_ERROR;
