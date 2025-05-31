@@ -133,4 +133,5 @@ public:
     CUnlockListener *_pUnlockListener{};
     UnlockResult _unlockResult{};
     bool _isSelected{};
+    static bool isDeselectedSwitch;
 };
