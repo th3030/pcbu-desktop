@@ -8,7 +8,7 @@
 
 class BTUnlockClient : public BaseUnlockConnection {
 public:
-    BTUnlockClient(const std::string& deviceAddress, const PairedDevice& device);
+    BTUnlockClient(const std::string& deviceAddress, const PairedDevice& device, const int &otherClient);
 
     bool Start() override;
     void Stop() override;
@@ -19,6 +19,14 @@ private:
     int m_Channel;
     SOCKET m_ClientSocket;
     std::string m_DeviceAddress;
+    static bool isAlreadyConnected;
+    static std::string firstClientUsername;
+    static std::string otherClientUsername;
+#ifdef WINDOWS
+    bool clientHadConnected;
+    static bool restartPending;
+    static bool userAccountSwitch;
+#endif
 };
 
 #endif
