@@ -5,11 +5,13 @@
 BaseUnlockConnection::BaseUnlockConnection() {
     m_UnlockToken = StringUtils::RandomString(64);
     m_UnlockState = UnlockState::UNKNOWN;
+    m_OtherClient = 0;
 }
 
 BaseUnlockConnection::BaseUnlockConnection(const PairedDevice& device)
     : BaseUnlockConnection() {
     m_PairedDevice = device;
+    m_OtherClient = 0;
 }
 
 BaseUnlockConnection::~BaseUnlockConnection() {
@@ -32,6 +34,14 @@ UnlockResponseData BaseUnlockConnection::GetResponseData() {
 
 bool BaseUnlockConnection::HasClient() const {
     return m_HasConnection;
+}
+
+bool BaseUnlockConnection::IsRunning() {
+    return m_IsRunning;
+}
+
+int BaseUnlockConnection::getClientNumber() {
+    return m_OtherClient;
 }
 
 UnlockState BaseUnlockConnection::PollResult() {
