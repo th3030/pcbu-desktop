@@ -74,7 +74,7 @@ if [[ "$PLATFORM" == "win" ]]; then
   iscc ../win/installer.iss
   mv mysetup.exe PCBioUnlock-Setup-$ARCH.exe
 elif [[ "$PLATFORM" == "linux" ]]; then
-  wget "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$LINUX_ARCH.AppImage" && chmod +x ./linuxdeploy-$LINUX_ARCH.AppImage
+  wget "https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20240109-1/linuxdeploy-$LINUX_ARCH.AppImage" && chmod +x ./linuxdeploy-$LINUX_ARCH.AppImage
   wget "https://github.com/darealshinji/linuxdeploy-plugin-checkrt/releases/download/continuous/linuxdeploy-plugin-checkrt.sh" && chmod +x ./linuxdeploy-plugin-checkrt.sh
 
   rm -Rf appimage_dir/ || true
@@ -89,12 +89,12 @@ elif [[ "$PLATFORM" == "linux" ]]; then
   export EXTRA_QT_MODULES=svg;
   if [[ "$ARCH" == "arm64" ]] && [[ "$DOCKER_BUILD" == "1" ]]; then
     qemu-aarch64-static ./linuxdeploy-$LINUX_ARCH.AppImage --appdir appimage_dir --plugin checkrt --desktop-file ../linux/PCBioUnlock.desktop
-    wget "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-$LINUX_ARCH.AppImage" && chmod +x ./linuxdeploy-plugin-qt-$LINUX_ARCH.AppImage
+    wget "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20240109-1/linuxdeploy-plugin-qt-$LINUX_ARCH.AppImage" && chmod +x ./linuxdeploy-plugin-qt-$LINUX_ARCH.AppImage
     qemu-aarch64-static ./linuxdeploy-plugin-qt-$LINUX_ARCH.AppImage --appdir appimage_dir
     rm ./linuxdeploy-plugin-qt-$LINUX_ARCH.AppImage
     qemu-aarch64-static ./linuxdeploy-$LINUX_ARCH.AppImage --appdir appimage_dir --plugin checkrt --output appimage --desktop-file ../linux/PCBioUnlock.desktop
   else
-    wget "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-$LINUX_ARCH.AppImage" && chmod +x ./linuxdeploy-plugin-qt-$LINUX_ARCH.AppImage
+    wget "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20240109-1/linuxdeploy-plugin-qt-$LINUX_ARCH.AppImage" && chmod +x ./linuxdeploy-plugin-qt-$LINUX_ARCH.AppImage
     ./linuxdeploy-$LINUX_ARCH.AppImage --appdir appimage_dir --plugin qt --plugin checkrt --output appimage --desktop-file ../linux/PCBioUnlock.desktop
   fi
   mv PC_Bio_Unlock*.AppImage PCBioUnlock.AppImage
