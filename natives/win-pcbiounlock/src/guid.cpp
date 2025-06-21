@@ -6,6 +6,7 @@
 //
 // Copyright (c) Microsoft Corporation. All rights reserved.
 //
-
+// clang-format off
 #include <initguid.h>
 #include "guid.h"
+// clang-format on
