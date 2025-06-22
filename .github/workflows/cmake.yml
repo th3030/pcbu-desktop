@@ -17,7 +17,7 @@ jobs:
           submodules: recursive
 
       - name: vcpkg build x64
-        uses: th3030/vcpkg-action@v6.1
+        uses: johnwason/vcpkg-action@v6
         with:
           pkgs: openssl
           triplet: x64-windows-static
@@ -26,18 +26,18 @@ jobs:
           cache-key: 'vcpkg-x64'
 
       - name: Install Qt x64
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@v3
         with:
           dir: 'C:/'
-          version: '6.7.2'
+          version: '6.9.1'
           host: 'windows'
           target: 'desktop'
-          arch: 'win64_msvc2019_64'
+          arch: 'win64_msvc2022_64'
           cache: 'true'
           cache-key-prefix: 'qt-x64'
 
       - name: Build x64
-        run: bash -c "cd pkg && chmod +x build-desktop.sh && ARCH=x64 QT_BASE_DIR=C:/Qt/6.7.2 ./build-desktop.sh"
+        run: bash -c "cd pkg && chmod +x build-desktop.sh && ARCH=x64 QT_BASE_DIR=C:/Qt/6.9.1 ./build-desktop.sh"
         env:
           VCPKG_ROOT: ${{github.workspace}}/vcpkg
 
@@ -47,39 +47,39 @@ jobs:
           files: |
             pkg/build/PCBioUnlock-Setup-x64.exe
 
-      - name: vcpkg build arm64
-        uses: th3030/vcpkg-action@v6.1
-        with:
-          pkgs: openssl
-          triplet: arm64-windows-static
-          token: ${{ github.token }}
-          github-binarycache: true
-          cache-key: 'vcpkg-arm64'
+#      - name: vcpkg build arm64
+#        uses: johnwason/vcpkg-action@v6
+#        with:
+#          pkgs: openssl
+#          triplet: arm64-windows-static
+#          token: ${{ github.token }}
+#          github-binarycache: true
+#          cache-key: 'vcpkg-arm64'
+#
+#      - name: Install Qt arm64
+#        uses: jurplel/install-qt-action@v3
+#        with:
+#          dir: 'C:/'
+#          version: '6.9.1'
+#          host: 'windows'
+#          target: 'desktop'
+#          arch: 'win64_msvc2022_arm64_cross_compiled'
+#          cache: 'true'
+#          cache-key-prefix: 'qt-arm64'
+#
+#      - name: Build arm64
+#        run: bash -c "cd pkg && rm -Rf ./build/ && ARCH=arm64 QT_BASE_DIR=C:/Qt/6.9.1 ./build-desktop.sh"
+#        env:
+#          VCPKG_ROOT: ${{github.workspace}}/vcpkg
 
-      - name: Install Qt arm64
-        uses: jurplel/install-qt-action@v4
-        with:
-          dir: 'C:/'
-          version: '6.7.2'
-          host: 'windows'
-          target: 'desktop'
-          arch: 'win64_msvc2019_arm64'
-          cache: 'true'
-          cache-key-prefix: 'qt-arm64'
-
-      - name: Build arm64
-        run: bash -c "cd pkg && rm -Rf ./build/ && ARCH=arm64 QT_BASE_DIR=C:/Qt/6.7.2 ./build-desktop.sh"
-        env:
-          VCPKG_ROOT: ${{github.workspace}}/vcpkg
-
-      - name: Upload arm64
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            pkg/build/PCBioUnlock-Setup-arm64.exe
+#      - name: Upload arm64
+#        uses: softprops/action-gh-release@v2
+#        with:
+#          files: |
+#            pkg/build/PCBioUnlock-Setup-arm64.exe
 
   build-linux-x64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -95,14 +95,11 @@ jobs:
             pkg/build/PCBioUnlock-x64.AppImage
 
   build-linux-arm64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Install QEMU + binfmt
-        run: sudo apt-get update && sudo apt-get install -y binfmt-support qemu-user-static
 
       - name: Build docker
         run: bash -c "cd ${{github.workspace}}/pkg/linux && chmod +x docker-build.sh && ARCH=arm64 ./docker-build.sh"
@@ -123,17 +120,17 @@ jobs:
       - name: Prepare Qt
         run: sudo chmod 777 /opt
       - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@v3
         with:
           dir: '/opt'
-          version: '6.7.2'
+          version: '6.9.1'
           host: 'mac'
           target: 'desktop'
           arch: 'clang_64'
           cache: 'true'
 
       - name: Build
-        run: bash -c "cd pkg && rm -Rf ./build/ && ARCH=arm64 QT_BASE_DIR=/opt/Qt/6.7.2 CI_BUILD=1 ./build-desktop.sh"
+        run: bash -c "cd pkg && rm -Rf ./build/ && ARCH=arm64 QT_BASE_DIR=/opt/Qt/6.9.1 CI_BUILD=1 ./build-desktop.sh"
 
       - name: Upload
         uses: softprops/action-gh-release@v2

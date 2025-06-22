@@ -5,13 +5,13 @@
 
 class BTUnlockClient : public BaseUnlockConnection {
 public:
-    BTUnlockClient(const std::string& deviceAddress, const PairedDevice& device, const int &otherClient);
+  BTUnlockClient(const std::string& deviceAddress, const PairedDevice& device, const int &otherClient);
 
-    bool Start() override;
-    void Stop() override;
+  bool Start() override;
+  void Stop() override;
 
 private:
-    void *m_Wrapper{};
+  void *m_Wrapper{};
 };
 
-#endif //PCBU_DESKTOP_BTUNLOCKCLIENT_MAC_H
+#endif // PCBU_DESKTOP_BTUNLOCKCLIENT_MAC_H
