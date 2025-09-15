@@ -17,16 +17,15 @@ jobs:
           submodules: recursive
 
       - name: vcpkg build x64
-        uses: johnwason/vcpkg-action@v6
+        uses: johnwason/vcpkg-action@v7
         with:
           pkgs: openssl
           triplet: x64-windows-static
-          token: ${{ github.token }}
-          github-binarycache: true
           cache-key: 'vcpkg-x64'
+          token: ${{ github.token }}
 
       - name: Install Qt x64
-        uses: jurplel/install-qt-action@v3
+        uses: jurplel/install-qt-action@v4
         with:
           dir: 'C:/'
           version: '6.9.2'
@@ -48,16 +47,15 @@ jobs:
             pkg/build/PCBioUnlock-Setup-x64.exe
 
       - name: vcpkg build arm64
-        uses: johnwason/vcpkg-action@v6
+        uses: johnwason/vcpkg-action@v7
         with:
           pkgs: openssl
           triplet: arm64-windows-static
           token: ${{ github.token }}
-          github-binarycache: true
           cache-key: 'vcpkg-arm64'
 
       - name: Install Qt arm64
-        uses: jurplel/install-qt-action@v3
+        uses: jurplel/install-qt-action@v4
         with:
           dir: 'C:/'
           version: '6.9.2'
@@ -120,7 +118,7 @@ jobs:
       - name: Prepare Qt
         run: sudo chmod 777 /opt
       - name: Install Qt
-        uses: jurplel/install-qt-action@v3
+        uses: jurplel/install-qt-action@v4
         with:
           dir: '/opt'
           version: '6.9.2'
@@ -128,6 +126,7 @@ jobs:
           target: 'desktop'
           arch: 'clang_64'
           cache: 'true'
+          cache-key-prefix: 'qt-arm'
 
       - name: Build
         run: bash -c "cd pkg && rm -Rf ./build/ && ARCH=arm64 QT_BASE_DIR=/opt/Qt/6.9.2 CI_BUILD=1 ./build-desktop.sh"
