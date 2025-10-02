@@ -45,6 +45,7 @@ private:
   UnlockResult RunServer(BaseUnlockConnection *connection, AtomicUnlockResult *currentResult, std::atomic<bool> *isRunning);
   std::function<void (std::string)> m_PrintMessage{};
   static bool otherClientConnectedFirst;
+  static bool netDownError;
 };
 
 #endif // PAM_PCBIOUNLOCK_UNLOCKHANDLER_H

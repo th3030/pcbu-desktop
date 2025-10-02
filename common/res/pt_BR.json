@@ -20,6 +20,8 @@
   "unlock_canceled": "Cancelado.",
   "unlock_timeout": "Tempo esgotado.",
   "unlock_error_connect": "Não foi possível conectar ao telefone.",
+  "unlock_error_connect_retry": "Não foi possível conectar ao telefone. Tentando novamente...",
+  "unlock_error_netdown": "Tipo de conexão não habilitado.",
   "unlock_error_time": "Erro: o horário do PC não corresponde ao do telefone.",
   "unlock_error_data": "Erro: dados inválidos recebidos.",
   "unlock_error_not_paired": "Erro: não pareado no telefone.",

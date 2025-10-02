@@ -21,6 +21,7 @@
 #endif
 
 bool UnlockHandler::otherClientConnectedFirst = false;
+bool UnlockHandler::netDownError = false;
 
 UnlockHandler::UnlockHandler(const std::function<void(std::string)> &printMessage) {
   m_PrintMessage = printMessage;
@@ -31,6 +32,8 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
   auto netIf = NetworkHelper::GetSavedNetworkInterface();
   auto devices = PairedDevicesStorage::GetDevicesForUser(authUser);
   auto hasTCPServer = false;
+  if(otherClientConnectedFirst)
+    otherClientConnectedFirst = false;
 
   UDPBroadcaster *broadcastClient{};
   std::vector<BaseUnlockConnection *> connections{};
@@ -137,7 +140,9 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
   }
 
   auto connectMessage = I18n::Get(connection->IsServer() ? "wait_server_phone_connect" : "wait_client_phone_connect");
-  m_PrintMessage(connectMessage);
+  if(connection->getClientNumber() == 0) {
+    m_PrintMessage(connectMessage);
+  }
   auto keyScanner = KeyScanner();
   keyScanner.Start();
 
@@ -153,14 +158,13 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
     }
 
     if(connection->HasClient() && isWaitingForConnection) {
-      if(connection->getClientNumber() != 0) {
+      if(connection->getClientNumber() != 0)
         otherClientConnectedFirst = true;
-        m_PrintMessage(I18n::Get("wait_phone_unlock"));
-        isWaitingForConnection = false;
-      }
-      if(connection->getClientNumber() == 0 && otherClientConnectedFirst) {
-        m_PrintMessage(I18n::Get("wait_phone_unlock"));
-      }
+      m_PrintMessage(I18n::Get("wait_phone_unlock"));
+      isWaitingForConnection = false;
+    }
+    if(connection->getClientNumber() == 0 && otherClientConnectedFirst) {
+      m_PrintMessage(I18n::Get("wait_phone_unlock"));
     }
 
     state = connection->PollResult();
@@ -177,8 +181,6 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
       isWaitingForConnection = true;
       isFutureCancel = false;
     }
-
-    state = connection->PollResult();
     if(state != UnlockState::UNKNOWN)
       break;
     if(!connection->HasClient() && Utils::GetCurrentTimeMs() - startTime > CRYPT_PACKET_TIMEOUT) {
@@ -190,26 +192,33 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
       break;
     }
 
-    if(connection->getClientNumber() == 0 && otherClientConnectedFirst)
-        otherClientConnectedFirst = false;
-    if(state == UnlockState::CONNECT_ERROR) {
-        now = std::chrono::steady_clock::now();
-        if (now - lastLogTime < std::chrono::seconds(1)) {
-            m_PrintMessage(I18n::Get("unlock_error_netdown"));
-            std::this_thread::sleep_for(std::chrono::milliseconds(2500));
-            isFutureCancel = true;
-        }
-    }
-
     if(!connection->HasClient() && !isWaitingForConnection) {
-      m_PrintMessage(connectMessage);
+      if(connection->getClientNumber() == 0 && !otherClientConnectedFirst)
+        m_PrintMessage(connectMessage);
       isWaitingForConnection = true;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
   }
 
+  if(connection->getClientNumber() == 0 && otherClientConnectedFirst)
+    otherClientConnectedFirst = false;
+
+  if(state == UnlockState::CONNECT_ERROR) {
+    now = std::chrono::steady_clock::now();
+    if(now - lastLogTime < std::chrono::seconds(1)) {
+      netDownError = true;
+      m_PrintMessage(I18n::Get("unlock_error_netdown"));
+      isFutureCancel = true;
+    }
+  }
+
   connection->Stop();
   keyScanner.Stop();
+  if(netDownError) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(3500));
+    netDownError = false;
+  }
+
   if(!isFutureCancel)
     m_PrintMessage(UnlockStateUtils::ToString(state));
   spdlog::info("Connection result: {}", UnlockStateUtils::ToString(state));
