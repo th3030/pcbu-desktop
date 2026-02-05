@@ -12,13 +12,8 @@ env:
   QT_VERSION: 6.10.2
 
 jobs:
-<<<<<<< HEAD
-  build-windows:
-    runs-on: windows-2022
-=======
   build-windows-x64:
     runs-on: windows-latest
->>>>>>> ad150ae95ad9c9fc0d7e79ccae5031c149779fc4
     steps:
       - uses: actions/checkout@v6
         with:
@@ -29,12 +24,7 @@ jobs:
         with:
           pkgs: openssl
           triplet: x64-windows-static
-<<<<<<< HEAD
-          token: ${{ github.token }}
-          revision: master
-=======
           token: ${{github.token}}
->>>>>>> ad150ae95ad9c9fc0d7e79ccae5031c149779fc4
           cache-key: 'vcpkg-x64'
 
       - name: Install Qt x64
@@ -102,12 +92,7 @@ jobs:
         with:
           pkgs: openssl
           triplet: arm64-windows-static
-<<<<<<< HEAD
-          token: ${{ github.token }}
-          revision: master
-=======
           token: ${{github.token}}
->>>>>>> ad150ae95ad9c9fc0d7e79ccae5031c149779fc4
           cache-key: 'vcpkg-arm64'
 
       - name: Install Qt arm64
