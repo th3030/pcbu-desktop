@@ -50,11 +50,7 @@ ApplicationWindow {
             Button {
                 id: downloadButton
                 text: QI18n.Get('download')
-                onClicked: {
-                    downloadButton.enabled = false;
-                    ignoreButton.enabled = false;
-                    UpdaterWindow.OnDownloadClicked(updaterWindow)
-                }
+                enabled = false
             }
             Button {
                 id: ignoreButton

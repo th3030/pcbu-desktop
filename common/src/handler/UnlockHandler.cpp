@@ -35,7 +35,7 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
   if(otherClientConnectedFirst)
     otherClientConnectedFirst = false;
 
-  UDPBroadcaster *broadcastClient{};
+  UDPBroadcaster *udpBroadcaster{};
   std::vector<BaseUnlockConnection *> connections{};
   for(const auto &device : devices) {
     BaseUnlockConnection *connection{};
@@ -48,10 +48,12 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
         connection = new BTUnlockClient(device.bluetoothAddress, device, 0);
         btConnection1 = new BTUnlockClient(device.bluetoothAddress, device, 1);
         break;
+      case PairingMethod::MANUAL_UDP:
       case PairingMethod::UDP: {
-        if(broadcastClient == nullptr)
-          broadcastClient = new UDPBroadcaster();
-        broadcastClient->AddDevice(device.pairingId, device.udpPort);
+        if(udpBroadcaster == nullptr)
+          udpBroadcaster = new UDPBroadcaster();
+        auto port = device.pairingMethod == PairingMethod::UDP ? device.udpPort : device.udpManualPort;
+        udpBroadcaster->AddDevice(device.id, port, device.pairingMethod == PairingMethod::MANUAL_UDP);
       }
       case PairingMethod::CLOUD_TCP:
         hasTCPServer = true;
@@ -70,7 +72,7 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
       connections.emplace_back(btConnection1);
     }
   }
-  if(!devices.empty() && settings.isManualUnlockEnabled || hasTCPServer) {
+  if(hasTCPServer) {
     auto server = new TCPUnlockServer();
     server->SetUnlockInfo(authUser, authProgram);
     connections.emplace_back(server);
@@ -106,8 +108,8 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
   }
 
   // UDP Broadcast
-  if(broadcastClient) {
-    broadcastClient->Start();
+  if(udpBroadcaster) {
+    udpBroadcaster->Start();
   }
 
   // Wait
@@ -116,9 +118,9 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
   auto result = currentResult.load();
 
   // Cleanup
-  if(broadcastClient) {
-    broadcastClient->Stop();
-    delete broadcastClient;
+  if(udpBroadcaster) {
+    udpBroadcaster->Stop();
+    delete udpBroadcaster;
   }
   for(auto &thread : threads) {
     if(thread.joinable())
@@ -223,9 +225,17 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
     m_PrintMessage(UnlockStateUtils::ToString(state));
   spdlog::info("Connection result: {}", UnlockStateUtils::ToString(state));
 
+  auto pwDec = CryptUtils::DecryptAES(connection->GetDevice().passwordEnc, connection->GetResponseData().passwordKey);
+  if(!pwDec.has_value() && state == UnlockState::SUCCESS) {
+    auto errorMsg = I18n::Get("error_password_decrypt");
+    spdlog::error(errorMsg);
+    m_PrintMessage(errorMsg);
+    return UnlockResult(UnlockState::DATA_ERROR);
+  }
+
   auto result = UnlockResult();
   result.state = state;
   result.device = connection->GetDevice();
-  result.password = connection->GetResponseData().password;
+  result.password = pwDec.has_value() ? pwDec.value() : "";
   return result;
 }
