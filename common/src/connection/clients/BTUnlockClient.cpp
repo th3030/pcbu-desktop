@@ -58,7 +58,7 @@ void BTUnlockClient::Stop() {
     write(m_ClientSocket, "CLOSE", 5);
 #ifdef WINDOWS
   if(m_OtherClient != 0 && m_UnlockState != UnlockState::SUCCESS && CUnlockCredential::IsDeselectedSwitch && !userAccountSwitch)
-    std::this_thread::sleep_for(std::chrono::milliseconds(2250));
+    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
 #endif
 
   m_IsRunning = false;
@@ -331,6 +331,9 @@ threadEnd:
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     goto socketStart;
   }
+  
+  if(m_UnlockState == UnlockState::SUCCESS)
+    userAccountSwitch = false;
 #endif
   SOCKET_CLOSE(m_ClientSocket);
 }
