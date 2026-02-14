@@ -3,10 +3,12 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <vector>
 
 struct PCBUAppStorage {
+  std::string machineID{};
   std::string installedVersion{};
   std::string language{};
   std::string serverIP{};
@@ -28,9 +30,15 @@ public:
   static PCBUAppStorage Get();
   static void Save(const PCBUAppStorage &storage);
 
-  static void SetInstalledVersion(bool isInstall);
+  static void InvalidateCache();
+  static void SetInstalledVersion(bool isInstalled);
 
 private:
+  static PCBUAppStorage Load();
+
+  static PCBUAppStorage g_Cache;
+  static std::mutex g_Mutex;
+
   static constexpr std::string_view SETTINGS_FILE_NAME = "app_settings.json";
 };
 
