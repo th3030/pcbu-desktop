@@ -331,6 +331,9 @@ threadEnd:
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     goto socketStart;
   }
+  
+  if(m_UnlockState == UnlockState::SUCCESS)
+    userAccountSwitch = false;
 #endif
   SOCKET_CLOSE(m_ClientSocket);
 }

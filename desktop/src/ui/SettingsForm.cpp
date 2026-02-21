@@ -1,5 +1,6 @@
 #include "SettingsForm.h"
 
+#include "shell/Shell.h"
 #include "utils/AppInfo.h"
 
 AppSettingsModel SettingsForm::GetSettings() {
@@ -28,6 +29,20 @@ void SettingsForm::SetServiceSettings(const QVariantList &settings) {
   m_EditServiceSettings = result;
 }
 
+bool SettingsForm::IsDebugLoggingEnabled() {
+  return std::filesystem::exists(AppSettings::GetBaseDir() / "LOG_DEBUG");
+}
+
+void SettingsForm::SetDebugLoggingEnabled(bool enabled) {
+  if(enabled) {
+    if(!Shell::CreateFile(AppSettings::GetBaseDir() / "LOG_DEBUG"))
+      spdlog::error("Failed to create debug log file.");
+  } else {
+    if(!Shell::RemoveFile(AppSettings::GetBaseDir() / "LOG_DEBUG"))
+      spdlog::error("Failed to remove debug log file.");
+  }
+}
+
 QString SettingsForm::GetOperatingSystem() {
   return QString::fromUtf8(AppInfo::GetOperatingSystem());
 }
@@ -47,5 +62,6 @@ void SettingsForm::OnSaveSettingsClicked(QObject *viewLoader, QObject *window) {
     spdlog::error("{}", ex.what());
     QMetaObject::invokeMethod(window, "showErrorMessage", Q_ARG(QVariant, "Failed to write service settings."));
   }
+  AppSettings::InvalidateCache();
   QMetaObject::invokeMethod(viewLoader, "setSource", Q_ARG(QUrl, QUrl("qrc:/ui/forms/MainForm.qml")));
 }

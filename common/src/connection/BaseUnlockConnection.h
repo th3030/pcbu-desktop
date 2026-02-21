@@ -8,14 +8,17 @@
 #include <utility>
 
 #include "BaseConnection.h"
+#include "Packets.h"
 #include "handler/UnlockState.h"
 #include "storage/PairedDevicesStorage.h"
 #include "utils/CryptUtils.h"
 #include "utils/Utils.h"
 
-struct UnlockResponseData {
-  std::string unlockToken;
-  std::string password;
+enum UnlockConnectionState {
+  NONE,
+  HAS_DEVICE_ID,
+  HAS_UNLOCK_REQUEST,
+  HAS_UNLOCK_RESPONSE,
 };
 
 class BaseUnlockConnection : public BaseConnection {
@@ -28,7 +31,7 @@ public:
   virtual void Stop() = 0;
 
   PairedDevice GetDevice();
-  UnlockResponseData GetResponseData();
+  PacketUnlockResponseData GetResponseData();
   [[nodiscard]] bool HasClient() const;
   bool IsRunning();
   int getClientNumber();
@@ -37,10 +40,11 @@ public:
   UnlockState PollResult();
 
 protected:
-  virtual void PerformAuthFlow(SOCKET socket);
+  void PerformAuthFlow(SOCKET socket, bool needsDeviceID = false);
 
 private:
-  std::string GetUnlockInfoPacket();
+  void OnPacketReceived(SOCKET socket, Packet &packet);
+  bool SendUnlockRequest(SOCKET socket);
   void OnResponseReceived(const Packet &packet);
 
 protected:
@@ -52,7 +56,10 @@ protected:
 
   std::atomic<UnlockState> m_UnlockState{};
   PairedDevice m_PairedDevice{};
-  UnlockResponseData m_ResponseData{};
+  PacketUnlockResponseData m_ResponseData{};
+
+  std::map<SOCKET, UnlockConnectionState> m_ConnectionStates{};
+  std::mutex m_StateMutex{};
 
   std::string m_AuthUser{};
   std::string m_AuthProgram{};

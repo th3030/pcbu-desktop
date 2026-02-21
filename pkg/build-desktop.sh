@@ -26,11 +26,11 @@ if [ -z "$QT_BASE_DIR" ]; then
   exit 1
 fi
 
-BUILD_CORES=3
+BUILD_CORES=4
 if [[ "$PLATFORM" == "win" ]]; then
   WIN_QT_PATH="$(cygpath -u "$QT_BASE_DIR")/msvc2022_64"
   WIN_QT_PATH_ARM64="$(cygpath -u "$QT_BASE_DIR")/msvc2022_arm64"
-  WIN_MT_PATH="/c/Program Files (x86)/Windows Kits/10/bin/10.0.22621.0/x64/mt.exe"
+  WIN_MT_PATH="/c/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/mt.exe"
 fi
 
 # Build
@@ -59,15 +59,12 @@ if [[ "$PLATFORM" == "win" ]]; then
   if [[ "$ARCH" == "arm64" ]]; then # ToDo: Workaround for no windeployqt on arm64
     find "installer_dir/" -type f -name "*.dll" | while read -r dll_file; do
       file_name=$(basename "$dll_file")
-      if [[ "$file_name" != "D3Dcompiler_47.dll" ]] && [[ "$file_name" != "opengl32sw.dll" ]]; then
-        replacement_file=$(find "$WIN_QT_PATH_ARM64" -type f -name "$file_name" | head -n 1)
-        if [ -f "$replacement_file" ]; then
-          echo "Replacing $dll_file with $replacement_file"
-          cp "$replacement_file" "$dll_file"
-        else
-          echo "No replacement found for $dll_file"
-          exit 1
-        fi
+      replacement_file=$(find "$WIN_QT_PATH_ARM64" -type f -name "$file_name" | head -n 1)
+      if [ -f "$replacement_file" ]; then
+        echo "Replacing $dll_file with $replacement_file"
+        cp "$replacement_file" "$dll_file"
+      else
+        echo "No replacement found for $dll_file"
       fi
     done
     rm installer_dir/D3Dcompiler_47.dll
@@ -88,8 +85,9 @@ elif [[ "$PLATFORM" == "linux" ]]; then
   cp ../../desktop/res/icons/icon.png appimage_dir/usr/share/icons/hicolor/256x256/apps/PCBioUnlock.png
   chmod +x appimage_dir/usr/bin/run-app.sh
 
-  export QML_SOURCES_PATHS=../../desktop/qml
-  export EXTRA_QT_MODULES=svg
+  export QML_SOURCES_PATHS="../../desktop/qml"
+  export EXTRA_QT_MODULES="svg;waylandcompositor"
+  export EXTRA_PLATFORM_PLUGINS="libqwayland.so"
   ./linuxdeploy-$LINUX_ARCH.AppImage --appdir appimage_dir --plugin checkrt --desktop-file ../linux/PCBioUnlock.desktop
   wget "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-$LINUX_ARCH.AppImage" && chmod +x ./linuxdeploy-plugin-qt-$LINUX_ARCH.AppImage
   ./linuxdeploy-plugin-qt-$LINUX_ARCH.AppImage --appdir appimage_dir

@@ -12,6 +12,7 @@ struct AppSettingsModel {
 public:
   AppSettingsModel() = default;
   explicit AppSettingsModel(const PCBUAppStorage &settings) {
+    machineID = QString::fromStdString(settings.machineID);
     installedVersion = QString::fromUtf8(settings.installedVersion);
     language = QString::fromUtf8(settings.language);
     serverIP = QString::fromUtf8(settings.serverIP);
@@ -21,10 +22,12 @@ public:
     clientSocketTimeout = settings.clientSocketTimeout;
     clientConnectTimeout = settings.clientConnectTimeout;
     clientConnectRetries = settings.clientConnectRetries;
-    waitForKeyPress = settings.waitForKeyPress;
+    winWaitForKeyPress = settings.winWaitForKeyPress;
+    winHidePasswordField = settings.winHidePasswordField;
   }
   [[nodiscard]] PCBUAppStorage ToStorage() const {
     auto settings = PCBUAppStorage();
+    settings.machineID = machineID.toStdString();
     settings.installedVersion = installedVersion.toStdString();
     settings.language = language.toStdString();
     settings.serverIP = serverIP.toStdString();
@@ -34,10 +37,12 @@ public:
     settings.clientSocketTimeout = clientSocketTimeout;
     settings.clientConnectTimeout = clientConnectTimeout;
     settings.clientConnectRetries = clientConnectRetries;
-    settings.waitForKeyPress = waitForKeyPress;
+    settings.winWaitForKeyPress = winWaitForKeyPress;
+    settings.winHidePasswordField = winHidePasswordField;
     return settings;
   }
 
+  QString machineID{};
   QString installedVersion{};
   QString language{};
   QString serverIP{};
@@ -47,7 +52,9 @@ public:
   uint32_t clientSocketTimeout{};
   uint32_t clientConnectTimeout{};
   uint32_t clientConnectRetries{};
-  bool waitForKeyPress{};
+  bool winWaitForKeyPress{};
+  bool winHidePasswordField{};
+  Q_PROPERTY(QString machineID MEMBER machineID)
   Q_PROPERTY(QString installedVersion MEMBER installedVersion)
   Q_PROPERTY(QString language MEMBER language)
   Q_PROPERTY(QString serverIP MEMBER serverIP)
@@ -57,7 +64,8 @@ public:
   Q_PROPERTY(uint32_t clientSocketTimeout MEMBER clientSocketTimeout)
   Q_PROPERTY(uint32_t clientConnectTimeout MEMBER clientConnectTimeout)
   Q_PROPERTY(uint32_t clientConnectRetries MEMBER clientConnectRetries)
-  Q_PROPERTY(bool waitForKeyPress MEMBER waitForKeyPress)
+  Q_PROPERTY(bool winWaitForKeyPress MEMBER winWaitForKeyPress)
+  Q_PROPERTY(bool winHidePasswordField MEMBER winHidePasswordField)
 };
 
 struct ServiceSettingModel {
@@ -81,6 +89,9 @@ public:
 
   Q_INVOKABLE QVariantList GetServiceSettings();
   Q_INVOKABLE void SetServiceSettings(const QVariantList &settings);
+
+  Q_INVOKABLE bool IsDebugLoggingEnabled();
+  Q_INVOKABLE void SetDebugLoggingEnabled(bool enabled);
 
   Q_INVOKABLE QString GetOperatingSystem();
 
