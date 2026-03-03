@@ -52,7 +52,7 @@ protected:
   std::thread m_AcceptThread{};
   std::atomic<bool> m_HasConnection{};
   std::string m_UserName{};
-  int m_OtherClient{};
+  bool m_OtherClient{};
 
   std::atomic<UnlockState> m_UnlockState{};
   PairedDevice m_PairedDevice{};

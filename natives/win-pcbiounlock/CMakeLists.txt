@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 project(win-pcbiounlock)
 set(CMAKE_CXX_STANDARD 23)
 
-add_compile_definitions(_WIN32_WINNT=0x0A00 _WIN32 WIN32 SAMPLEV2CREDENTIALPROVIDER_EXPORTS _WINDOWS WINDOWS _USRDLL UNICODE _UNICODE)
+add_compile_definitions(_WIN32 WIN32 SAMPLEV2CREDENTIALPROVIDER_EXPORTS _WINDOWS WINDOWS _USRDLL UNICODE _UNICODE)
 add_library(win-pcbiounlock SHARED
         src/win-pcbiounlock.def
         src/resource.rc
@@ -21,7 +21,7 @@ add_library(win-pcbiounlock SHARED
         src/CUnlockListener.h
         src/CUnlockListener.cpp
 )
-target_include_directories(win-pcbiounlock PUBLIC common-cpp/src ../../deps/headers)
+target_include_directories(win-pcbiounlock PUBLIC common-cpp/src)
 target_link_libraries(win-pcbiounlock PUBLIC Credui Shlwapi Secur32 pcbu_common)
 add_custom_command(TARGET win-pcbiounlock
         POST_BUILD
