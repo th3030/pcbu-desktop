@@ -16,11 +16,10 @@
 
 bool BTUnlockClient::isAlreadyConnected = false;
 bool BTUnlockClient::otherClientConnectedFirst = false;
-std::string BTUnlockClient::firstClientUsername = "";
-std::string BTUnlockClient::otherClientUsername = "";
+bool BTUnlockClient::successfullConnect = false;
+int BTUnlockClient::amountConnected = 0;
 #ifdef WINDOWS
 bool BTUnlockClient::restartPending = false;
-bool BTUnlockClient::userAccountSwitch = false;
 #endif
 
 BTUnlockClient::BTUnlockClient(const std::string &deviceAddress, const PairedDevice &device, const bool &otherClient) : BaseUnlockConnection(device) {
@@ -38,14 +37,8 @@ bool BTUnlockClient::Start() {
   WSA_STARTUP
   m_IsRunning = true;
   m_AcceptThread = std::thread(&BTUnlockClient::ConnectThread, this);
-  if(!m_OtherClient) {
-    firstClientUsername = m_AuthUser;
-    if(otherClientUsername.empty())
-      otherClientUsername = m_AuthUser;
-  } else {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-    otherClientUsername = m_AuthUser;
-  }
+  if(m_OtherClient)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1750));
   return true;
 }
 
@@ -55,10 +48,13 @@ void BTUnlockClient::Stop() {
 
   if(m_ClientSocket != -1 && m_HasConnection)
     write(m_ClientSocket, "CLOSE", 5);
-#ifdef WINDOWS
-  if(m_OtherClient != 0 && m_UnlockState != UnlockState::SUCCESS && !userAccountSwitch)
-    std::this_thread::sleep_for(std::chrono::milliseconds(2250));
-#endif
+  if(m_UnlockState != UnlockState::SUCCESS && amountConnected < 3 && !successfullConnect) {
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+  } else {
+    std::this_thread::sleep_for(std::chrono::milliseconds(750));
+  }
+  if(amountConnected > 1 && m_UnlockState == UnlockState::SUCCESS)
+    amountConnected = 0;
 
   m_IsRunning = false;
   m_HasConnection = false;
@@ -78,11 +74,11 @@ void BTUnlockClient::ConnectThread() {
     isAlreadyConnected = false;
   if(otherClientConnectedFirst)
     otherClientConnectedFirst = false;
+  if(successfullConnect)
+    successfullConnect = false;
 #ifdef WINDOWS
   if(restartPending)
     restartPending = false;
-  if(userAccountSwitch)
-    userAccountSwitch = false;
 #endif
   spdlog::info("Connecting via BT...");
 
@@ -97,7 +93,7 @@ void BTUnlockClient::ConnectThread() {
   address.btAddr = addr;
 
   now = std::chrono::steady_clock::now();
-  if(now - lastLogTime > std::chrono::seconds(10) && !restartPending && !isAlreadyConnected) {
+  if(now - lastLogTime > std::chrono::seconds(10) && !restartPending && !isAlreadyConnected && !otherClientConnectedFirst) {
     restartPending = true;
     lastLogTime = std::chrono::steady_clock::now();
     SC_HANDLE scManager = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
@@ -238,7 +234,7 @@ socketStart:
   fd_set fdSet{};
   FD_SET(m_ClientSocket, &fdSet);
   struct timeval connectTimeout{};
-  connectTimeout.tv_sec = 2;
+  connectTimeout.tv_sec = 3;
   if(!SetSocketRWTimeout(m_ClientSocket, settings.clientSocketTimeout)) {
     spdlog::error("Failed setting R/W timeout for socket. (Code={})", SOCKET_LAST_ERROR);
     m_UnlockState = UnlockState::UNK_ERROR;
@@ -280,40 +276,29 @@ socketStart:
   }
 
   m_HasConnection = true;
+  std::this_thread::sleep_for(std::chrono::milliseconds(750));
+  if(amountConnected < 3)
+    amountConnected++;
+
   if(!m_OtherClient) {
     if(otherClientConnectedFirst) {
       m_UnlockState = UnlockState::CANCELED;
       goto threadEnd;
-    }
-  #ifdef WINDOWS
-    if(!userAccountSwitch) {
-      if(firstClientUsername != otherClientUsername) {
-        userAccountSwitch = true;
-        m_UnlockState = UnlockState::CANCELED;
-        goto threadEnd;
-      }
-      isAlreadyConnected = true;
     } else {
-      m_UnlockState = UnlockState::CANCELED;
-      goto threadEnd;
+      isAlreadyConnected = true;
     }
-  #endif
   } else {
     if(isAlreadyConnected) {
       m_UnlockState = UnlockState::CANCELED;
       goto threadEnd;
+    } else {
+      otherClientConnectedFirst = true;
     }
-  #ifdef WINDOWS
-    if(firstClientUsername != otherClientUsername) {
-      userAccountSwitch = true;
-      m_UnlockState = UnlockState::CANCELED;
-      goto threadEnd;
-    }
-  #endif
   }
   spdlog::info("Connection established!");
-  std::this_thread::sleep_for(std::chrono::seconds(2));
   PerformAuthFlow(m_ClientSocket);
+  if(m_UnlockState == UnlockState::SUCCESS)
+    successfullConnect = true;
 
 threadEnd:
   m_IsRunning = false;

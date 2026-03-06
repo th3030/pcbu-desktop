@@ -21,12 +21,10 @@ private:
   std::string m_DeviceAddress;
   static bool isAlreadyConnected;
   static bool otherClientConnectedFirst;
-  static std::string firstClientUsername;
-  static std::string otherClientUsername;
+  static bool successfullConnect;
+  static int amountConnected;
 #ifdef WINDOWS
-  bool clientHadConnected;
   static bool restartPending;
-  static bool userAccountSwitch;
 #endif
 };
 
