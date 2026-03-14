@@ -7,8 +7,8 @@
 #include <thread>
 #include <utility>
 
-#include "BaseConnection.h"
-#include "Packets.h"
+#include "../BaseConnection.h"
+#include "../Packets.h"
 #include "handler/UnlockState.h"
 #include "storage/PairedDevicesStorage.h"
 #include "utils/CryptUtils.h"
@@ -34,7 +34,7 @@ public:
   PacketUnlockResponseData GetResponseData();
   [[nodiscard]] bool HasClient() const;
   bool IsRunning();
-  int getClientNumber();
+  bool isOtherClient();
 
   void SetUnlockInfo(const std::string &authUser, const std::string &authProgram);
   UnlockState PollResult();

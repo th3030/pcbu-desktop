@@ -1,10 +1,9 @@
 #include "UnlockHandler.h"
 
 #include "KeyScanner.h"
-#include "connection/UDPBroadcaster.h"
-#include "connection/clients/BTUnlockClient.h"
-#include "connection/clients/TCPUnlockClient.h"
-#include "connection/servers/TCPUnlockServer.h"
+#include "connection/unlock/clients/BTUnlockClient.h"
+#include "connection/unlock/clients/TCPUnlockClient.h"
+#include "connection/unlock/servers/TCPUnlockServer.h"
 #include "platform/NetworkHelper.h"
 #include "storage/AppSettings.h"
 
@@ -39,14 +38,14 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
   std::vector<BaseUnlockConnection *> connections{};
   for(const auto &device : devices) {
     BaseUnlockConnection *connection{};
-    BaseUnlockConnection *btConnection1{};
+    BaseUnlockConnection *btConnection{};
     switch(device.pairingMethod) {
       case PairingMethod::TCP:
         connection = new TCPUnlockClient(device.ipAddress, device.tcpPort, device);
         break;
       case PairingMethod::BLUETOOTH:
-        connection = new BTUnlockClient(device.bluetoothAddress, device, 0);
-        btConnection1 = new BTUnlockClient(device.bluetoothAddress, device, 1);
+        connection = new BTUnlockClient(device.bluetoothAddress, device, false);
+        btConnection = new BTUnlockClient(device.bluetoothAddress, device, true);
         break;
       case PairingMethod::MANUAL_UDP:
       case PairingMethod::UDP: {
@@ -67,9 +66,9 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
       connection->SetUnlockInfo(authUser, authProgram);
       connections.emplace_back(connection);
     }
-    if(btConnection1) {
-      btConnection1->SetUnlockInfo(authUser, authProgram);
-      connections.emplace_back(btConnection1);
+    if(btConnection) {
+      btConnection->SetUnlockInfo(authUser, authProgram);
+      connections.emplace_back(btConnection);
     }
   }
   if(hasTCPServer) {
@@ -142,7 +141,7 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
   }
 
   auto connectMessage = I18n::Get(connection->IsServer() ? "wait_server_phone_connect" : "wait_client_phone_connect");
-  if(connection->getClientNumber() == 0) {
+  if(!connection->isOtherClient()) {
     m_PrintMessage(connectMessage);
   }
   auto keyScanner = KeyScanner();
@@ -160,22 +159,23 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
     }
 
     if(connection->HasClient() && isWaitingForConnection) {
-      if(connection->getClientNumber() != 0)
+      if(connection->isOtherClient())
         otherClientConnectedFirst = true;
+
       m_PrintMessage(I18n::Get("wait_phone_unlock"));
       isWaitingForConnection = false;
     }
-    if(connection->getClientNumber() == 0 && otherClientConnectedFirst) {
+    if(!connection->isOtherClient() && otherClientConnectedFirst) {
       m_PrintMessage(I18n::Get("wait_phone_unlock"));
     }
 
     state = connection->PollResult();
     if(state == UnlockState::CONNECT_ERROR && connection->IsRunning()) {
-      if(connection->getClientNumber() == 0 && !otherClientConnectedFirst) {
+      if(!connection->isOtherClient() && !otherClientConnectedFirst) {
         m_PrintMessage(I18n::Get("unlock_error_connect_retry"));
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(2250));
-      if(connection->getClientNumber() == 0 && !otherClientConnectedFirst)
+      if(!connection->isOtherClient() && !otherClientConnectedFirst)
         m_PrintMessage(connectMessage);
 
       state = UnlockState::UNKNOWN;
@@ -195,14 +195,14 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
     }
 
     if(!connection->HasClient() && !isWaitingForConnection) {
-      if(connection->getClientNumber() == 0 && !otherClientConnectedFirst)
+      if(!connection->isOtherClient() && !otherClientConnectedFirst)
         m_PrintMessage(connectMessage);
       isWaitingForConnection = true;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
   }
 
-  if(connection->getClientNumber() == 0 && otherClientConnectedFirst)
+  if(!connection->isOtherClient() && otherClientConnectedFirst)
     otherClientConnectedFirst = false;
 
   if(state == UnlockState::CONNECT_ERROR) {

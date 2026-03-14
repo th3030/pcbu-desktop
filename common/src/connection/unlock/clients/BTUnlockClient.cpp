@@ -34,11 +34,20 @@ bool BTUnlockClient::Start() {
   if(m_IsRunning)
     return true;
 
+  if(isAlreadyConnected)
+    isAlreadyConnected = false;
+  if(otherClientConnectedFirst)
+    otherClientConnectedFirst = false;
+  if(successfullConnect)
+    successfullConnect = false;
+#ifdef WINDOWS
+  if(restartPending)
+    restartPending = false;
+#endif
+
   WSA_STARTUP
   m_IsRunning = true;
   m_AcceptThread = std::thread(&BTUnlockClient::ConnectThread, this);
-  if(m_OtherClient)
-    std::this_thread::sleep_for(std::chrono::milliseconds(1750));
   return true;
 }
 
@@ -68,18 +77,6 @@ void BTUnlockClient::ConnectThread() {
   auto now = std::chrono::steady_clock::now();
   uint32_t numRetries{};
   auto settings = AppSettings::Get();
-  int connectError = 0;
-  int allowedToLog = 3;
-  if(isAlreadyConnected)
-    isAlreadyConnected = false;
-  if(otherClientConnectedFirst)
-    otherClientConnectedFirst = false;
-  if(successfullConnect)
-    successfullConnect = false;
-#ifdef WINDOWS
-  if(restartPending)
-    restartPending = false;
-#endif
   spdlog::info("Connecting via BT...");
 
 #ifdef WINDOWS
@@ -221,7 +218,6 @@ socketStart:
   if(m_UnlockState == UnlockState::CONNECT_ERROR) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     m_UnlockState = UnlockState::UNKNOWN;
-    connectError = 0;
   }
 
   if((m_ClientSocket = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM)) == SOCKET_INVALID) {
@@ -246,6 +242,8 @@ socketStart:
     m_UnlockState = UnlockState::UNK_ERROR;
     goto threadEnd;
   }
+  if(m_OtherClient)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1750));
   if(connect(m_ClientSocket, reinterpret_cast<struct sockaddr *>(&address), sizeof(address)) < 0) {
     auto error = SOCKET_LAST_ERROR;
     if(error != SOCKET_ERROR_IN_PROGRESS && error != SOCKET_ERROR_WOULD_BLOCK) {
@@ -255,28 +253,25 @@ socketStart:
     }
   }
   if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &connectTimeout) <= 0) {
-    if(numRetries < 10 && m_IsRunning && connectError < allowedToLog + 1) {
-      if(numRetries >= allowedToLog) {
-        spdlog::error("select() timed out or failed. (Code={}, Retry={}, ConnectError={})", SOCKET_LAST_ERROR, numRetries, connectError);
-      }
+    if(numRetries <= 10 && m_IsRunning) {
+      spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
       SOCKET_CLOSE(m_ClientSocket);
+      m_UnlockState = UnlockState::CONNECT_ERROR;
       numRetries++;
-      connectError++;
       goto socketStart;
     }
 
-    if(connectError > allowedToLog && numRetries < settings.clientConnectRetries) {
-      spdlog::error("Device connection is hanging. (Code={})", SOCKET_LAST_ERROR);
-      SOCKET_CLOSE(m_ClientSocket);
-      m_UnlockState = UnlockState::CONNECT_ERROR;
-      goto socketStart;
-    }
     m_UnlockState = UnlockState::CONNECT_ERROR;
     goto threadEnd;
   }
 
   m_HasConnection = true;
   std::this_thread::sleep_for(std::chrono::milliseconds(750));
+  if(successfullConnect) {
+    m_UnlockState = UnlockState::CANCELED;
+    goto threadEnd;
+  }
+
   if(amountConnected < 3)
     amountConnected++;
 

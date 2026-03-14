@@ -6,12 +6,12 @@
 BaseUnlockConnection::BaseUnlockConnection() {
   m_UnlockToken = StringUtils::RandomString(64);
   m_UnlockState = UnlockState::UNKNOWN;
-  m_OtherClient = 0;
+  m_OtherClient = false;
 }
 
 BaseUnlockConnection::BaseUnlockConnection(const PairedDevice& device) : BaseUnlockConnection() {
   m_PairedDevice = device;
-  m_OtherClient = 0;
+  m_OtherClient = false;
 }
 
 BaseUnlockConnection::~BaseUnlockConnection() {
@@ -40,7 +40,7 @@ bool BaseUnlockConnection::IsRunning() {
     return m_IsRunning;
 }
 
-int BaseUnlockConnection::getClientNumber() {
+bool BaseUnlockConnection::isOtherClient() {
     return m_OtherClient;
 }
 
@@ -136,7 +136,7 @@ bool BaseUnlockConnection::SendUnlockRequest(SOCKET socket) {
     return false;
   }
   auto requestPacket = PacketUnlockRequest();
-  requestPacket.protoVersion = AppInfo::GetProtocolVersion();
+  requestPacket.protoVersion = AppInfo::GetUnlockProtocolVersion();
   requestPacket.deviceId = m_PairedDevice.id;
   requestPacket.encData = StringUtils::ToHexString(cryptResult.data);
   auto requestStr = requestPacket.ToJson().dump();
