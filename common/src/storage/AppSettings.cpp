@@ -76,8 +76,8 @@ PCBUAppStorage AppSettings::Load() {
     def.pairingServerPort = 43295;
     def.unlockServerPort = 43296;
     def.clientSocketTimeout = 120;
-    def.clientConnectTimeout = 2;
-    def.clientConnectRetries = 10;
+    def.clientConnectTimeout = 5;
+    def.clientConnectRetries = 12;
 
     def.winWaitForKeyPress = true;
     def.winHidePasswordField = false;

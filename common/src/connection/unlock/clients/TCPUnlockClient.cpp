@@ -44,7 +44,6 @@ void TCPUnlockClient::Stop() {
 void TCPUnlockClient::ConnectThread() {
   uint32_t numRetries{};
   auto settings = AppSettings::Get();
-  int optionTrue = 1;
   spdlog::info("Connecting via TCP...");
 
   struct sockaddr_in serv_addr{};
@@ -106,6 +105,7 @@ socketStart:
   }
 
   m_HasConnection = true;
+  std::this_thread::sleep_for(std::chrono::milliseconds(750));
   PerformAuthFlow(m_ClientSocket);
 
 threadEnd:

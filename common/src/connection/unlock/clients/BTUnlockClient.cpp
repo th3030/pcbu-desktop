@@ -57,8 +57,8 @@ void BTUnlockClient::Stop() {
 
   if(m_ClientSocket != -1 && m_HasConnection)
     write(m_ClientSocket, "CLOSE", 5);
-  if(m_UnlockState != UnlockState::SUCCESS && amountConnected < 3 && !successfullConnect) {
-    std::this_thread::sleep_for(std::chrono::seconds(5));
+  if(m_UnlockState != UnlockState::SUCCESS && amountConnected < 2 && !successfullConnect) {
+    std::this_thread::sleep_for(std::chrono::seconds(4));
   } else {
     std::this_thread::sleep_for(std::chrono::milliseconds(750));
   }
@@ -230,7 +230,7 @@ socketStart:
   fd_set fdSet{};
   FD_SET(m_ClientSocket, &fdSet);
   struct timeval connectTimeout{};
-  connectTimeout.tv_sec = 3;
+  connectTimeout.tv_sec = 5;
   if(!SetSocketRWTimeout(m_ClientSocket, settings.clientSocketTimeout)) {
     spdlog::error("Failed setting R/W timeout for socket. (Code={})", SOCKET_LAST_ERROR);
     m_UnlockState = UnlockState::UNK_ERROR;
@@ -243,7 +243,7 @@ socketStart:
     goto threadEnd;
   }
   if(m_OtherClient)
-    std::this_thread::sleep_for(std::chrono::milliseconds(1750));
+    std::this_thread::sleep_for(std::chrono::milliseconds(750));
   if(connect(m_ClientSocket, reinterpret_cast<struct sockaddr *>(&address), sizeof(address)) < 0) {
     auto error = SOCKET_LAST_ERROR;
     if(error != SOCKET_ERROR_IN_PROGRESS && error != SOCKET_ERROR_WOULD_BLOCK) {
@@ -253,7 +253,7 @@ socketStart:
     }
   }
   if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &connectTimeout) <= 0) {
-    if(numRetries <= 10 && m_IsRunning) {
+    if(numRetries <= 12 && m_IsRunning) {
       spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
       SOCKET_CLOSE(m_ClientSocket);
       m_UnlockState = UnlockState::CONNECT_ERROR;
@@ -272,7 +272,7 @@ socketStart:
     goto threadEnd;
   }
 
-  if(amountConnected < 3)
+  if(amountConnected < 2)
     amountConnected++;
 
   if(!m_OtherClient) {
