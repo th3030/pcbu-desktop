@@ -106,6 +106,7 @@ socketStart:
   }
 
   m_HasConnection = true;
+  std::this_thread::sleep_for(std::chrono::milliseconds(250));
   PerformAuthFlow(m_ClientSocket);
 
 threadEnd:

@@ -22,10 +22,6 @@ private:
   static bool isAlreadyConnected;
   static bool otherClientConnectedFirst;
   static bool successfullConnect;
-  static int amountConnected;
-#ifdef WINDOWS
-  static bool restartPending;
-#endif
 };
 
 #endif

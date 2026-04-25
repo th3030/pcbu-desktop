@@ -17,10 +17,6 @@
 bool BTUnlockClient::isAlreadyConnected = false;
 bool BTUnlockClient::otherClientConnectedFirst = false;
 bool BTUnlockClient::successfullConnect = false;
-int BTUnlockClient::amountConnected = 0;
-#ifdef WINDOWS
-bool BTUnlockClient::restartPending = false;
-#endif
 
 BTUnlockClient::BTUnlockClient(const std::string &deviceAddress, const PairedDevice &device, const bool &otherClient) : BaseUnlockConnection(device) {
   m_DeviceAddress = deviceAddress;
@@ -34,11 +30,17 @@ bool BTUnlockClient::Start() {
   if(m_IsRunning)
     return true;
 
+  if(isAlreadyConnected)
+    isAlreadyConnected = false;
+  if(otherClientConnectedFirst)
+    otherClientConnectedFirst = false;
+  if(successfullConnect)
+    successfullConnect = false;
+
   WSA_STARTUP
   m_IsRunning = true;
+  std::this_thread::sleep_for(std::chrono::milliseconds(250));
   m_AcceptThread = std::thread(&BTUnlockClient::ConnectThread, this);
-  if(m_OtherClient)
-    std::this_thread::sleep_for(std::chrono::milliseconds(1750));
   return true;
 }
 
@@ -48,13 +50,15 @@ void BTUnlockClient::Stop() {
 
   if(m_ClientSocket != -1 && m_HasConnection)
     write(m_ClientSocket, "CLOSE", 5);
-  if(m_UnlockState != UnlockState::SUCCESS && amountConnected < 3 && !successfullConnect) {
-    std::this_thread::sleep_for(std::chrono::seconds(5));
-  } else {
-    std::this_thread::sleep_for(std::chrono::milliseconds(750));
+  if(m_UnlockState != UnlockState::SUCCESS && !successfullConnect) {
+    if(m_OtherClient) {
+      if(!isAlreadyConnected)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2250));
+    } else {
+      if(!otherClientConnectedFirst)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2250));
+    }
   }
-  if(amountConnected > 1 && m_UnlockState == UnlockState::SUCCESS)
-    amountConnected = 0;
 
   m_IsRunning = false;
   m_HasConnection = false;
@@ -68,18 +72,6 @@ void BTUnlockClient::ConnectThread() {
   auto now = std::chrono::steady_clock::now();
   uint32_t numRetries{};
   auto settings = AppSettings::Get();
-  int connectError = 0;
-  int allowedToLog = 3;
-  if(isAlreadyConnected)
-    isAlreadyConnected = false;
-  if(otherClientConnectedFirst)
-    otherClientConnectedFirst = false;
-  if(successfullConnect)
-    successfullConnect = false;
-#ifdef WINDOWS
-  if(restartPending)
-    restartPending = false;
-#endif
   spdlog::info("Connecting via BT...");
 
 #ifdef WINDOWS
@@ -91,115 +83,6 @@ void BTUnlockClient::ConnectThread() {
   address.addressFamily = AF_BTH;
   address.serviceClassId = guid;
   address.btAddr = addr;
-
-  now = std::chrono::steady_clock::now();
-  if(now - lastLogTime > std::chrono::seconds(10) && !restartPending && !isAlreadyConnected && !otherClientConnectedFirst) {
-    restartPending = true;
-    lastLogTime = std::chrono::steady_clock::now();
-    SC_HANDLE scManager = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS);
-    if(scManager == NULL) {
-      spdlog::error("Failed to open SCManager. (Error={})", GetLastError());
-      return;
-    }
-
-    SC_HANDLE bluetoothService =
-        OpenServiceW(scManager, L"bthserv", SERVICE_STOP | SERVICE_START | SERVICE_QUERY_STATUS | SERVICE_ENUMERATE_DEPENDENTS);
-    if(bluetoothService == NULL) {
-      spdlog::error("Failed to open Bluetooth service. (Error={})", GetLastError());
-      CloseServiceHandle(scManager);
-      return;
-    }
-
-    // Query dependent services
-    DWORD bytesNeeded = 0;
-    DWORD serviceCount = 0;
-    EnumDependentServices(bluetoothService, SERVICE_ACTIVE, nullptr, 0, &bytesNeeded, &serviceCount);
-
-    if(bytesNeeded > 0) {
-      std::vector<BYTE> buffer(bytesNeeded);
-      LPENUM_SERVICE_STATUS dependencies = reinterpret_cast<LPENUM_SERVICE_STATUS>(buffer.data());
-
-      if(EnumDependentServices(bluetoothService, SERVICE_ACTIVE, dependencies, bytesNeeded, &bytesNeeded, &serviceCount)) {
-        for(DWORD i = 0; i < serviceCount; i++) {
-          std::string dependentServiceName = dependencies[i].lpServiceName;
-          SC_HANDLE recHService = OpenService(scManager, dependentServiceName.c_str(), SERVICE_STOP | SERVICE_QUERY_STATUS);
-          if(!recHService) {
-            spdlog::error("Failed to open service: ({}), Error=({})", dependentServiceName, GetLastError());
-          }
-
-          // Stop the service
-          SERVICE_STATUS recStatus;
-          if(ControlService(recHService, SERVICE_CONTROL_STOP, &recStatus)) {
-            spdlog::info("Stopping Bluetooth service...");
-            std::this_thread::sleep_for(std::chrono::seconds(2)); // Wait a moment for the service to stop
-          } else {
-            spdlog::error("Failed to stop Bluetooth service. (Error={})", GetLastError());
-          }
-
-          CloseServiceHandle(recHService);
-        }
-      }
-    }
-
-    // Stop the service
-    SERVICE_STATUS status;
-    if(ControlService(bluetoothService, SERVICE_CONTROL_STOP, &status)) {
-      spdlog::info("Stopping Bluetooth service...");
-      std::this_thread::sleep_for(std::chrono::seconds(2)); // Wait a moment for the service to stop
-    } else {
-      spdlog::error("Failed to stop Bluetooth service. (Error={})", GetLastError());
-    }
-
-    // Start the service
-    if(StartServiceW(bluetoothService, 0, NULL)) {
-      spdlog::info("Bluetooth service restarted successfully.");
-    } else {
-      spdlog::error("Failed to start Bluetooth service. (Error={})", GetLastError());
-    }
-
-    // Query service configuration to get the dependencies
-    bytesNeeded = 0;
-    QueryServiceConfig(bluetoothService, nullptr, 0, &bytesNeeded);
-    if(GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
-      std::vector<BYTE> buffer(bytesNeeded);
-      LPQUERY_SERVICE_CONFIG serviceConfig = reinterpret_cast<LPQUERY_SERVICE_CONFIG>(buffer.data());
-
-      if(QueryServiceConfig(bluetoothService, serviceConfig, bytesNeeded, &bytesNeeded)) {
-        if(serviceConfig->lpDependencies) {
-          // Dependencies are a double-null-terminated string array
-          LPSTR dependency = serviceConfig->lpDependencies;
-          while(*dependency) {
-            std::string dependentServiceName(dependency);
-            SC_HANDLE recHService = OpenService(scManager, dependentServiceName.c_str(), SERVICE_START | SERVICE_QUERY_STATUS);
-            if(!recHService) {
-              spdlog::error("Failed to open service: ({}), Error=({})", dependentServiceName.c_str(), GetLastError());
-            }
-
-            // Start the current service
-            if(!StartService(recHService, 0, nullptr)) {
-              DWORD err = GetLastError();
-              if(err == ERROR_SERVICE_ALREADY_RUNNING) {
-                spdlog::info("({}) is already running.", dependentServiceName.c_str());
-              } else {
-                spdlog::error("Failed to start service, ({}), Error=({})", dependentServiceName.c_str(), GetLastError());
-              }
-            } else {
-              spdlog::info("Successfully started ({})", dependentServiceName.c_str());
-            }
-
-            CloseServiceHandle(recHService);
-            dependency += dependentServiceName.length() + 1; // Move to next string
-          }
-        }
-      } else {
-        spdlog::error("Failed to query Bluetooth service config, Error=({})", GetLastError());
-      }
-    }
-
-    CloseServiceHandle(bluetoothService);
-    CloseServiceHandle(scManager);
-    restartPending = false;
-  }
 #elif LINUX
   // 62182bf7-97c8-45f9-aa2c-53c5f2008bdf
   static uint8_t CHANNEL_UUID[16] = {0x62, 0x18, 0x2b, 0xf7, 0x97, 0xc8, 0x45, 0xf9, 0xaa, 0x2c, 0x53, 0xc5, 0xf2, 0x00, 0x8b, 0xdf};
@@ -219,9 +102,8 @@ void BTUnlockClient::ConnectThread() {
 
 socketStart:
   if(m_UnlockState == UnlockState::CONNECT_ERROR) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
     m_UnlockState = UnlockState::UNKNOWN;
-    connectError = 0;
   }
 
   if((m_ClientSocket = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM)) == SOCKET_INVALID) {
@@ -230,11 +112,22 @@ socketStart:
     m_UnlockState = UnlockState::UNK_ERROR;
     return;
   }
-
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  if(m_OtherClient)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
   fd_set fdSet{};
   FD_SET(m_ClientSocket, &fdSet);
   struct timeval connectTimeout{};
-  connectTimeout.tv_sec = 3;
+  
+  if(m_OtherClient) {
+    now = std::chrono::steady_clock::now();
+    if(now - lastLogTime > std::chrono::seconds(10)) {
+      m_UnlockState = UnlockState::CANCELED;
+      goto threadEnd;
+    }
+  }
+
+  connectTimeout.tv_sec = 7;
   if(!SetSocketRWTimeout(m_ClientSocket, settings.clientSocketTimeout)) {
     spdlog::error("Failed setting R/W timeout for socket. (Code={})", SOCKET_LAST_ERROR);
     m_UnlockState = UnlockState::UNK_ERROR;
@@ -254,31 +147,31 @@ socketStart:
       goto threadEnd;
     }
   }
+  std::this_thread::sleep_for(std::chrono::milliseconds(250));
   if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &connectTimeout) <= 0) {
-    if(numRetries < 10 && m_IsRunning && connectError < allowedToLog + 1) {
-      if(numRetries >= allowedToLog) {
-        spdlog::error("select() timed out or failed. (Code={}, Retry={}, ConnectError={})", SOCKET_LAST_ERROR, numRetries, connectError);
-      }
+    if(numRetries < 2 && m_IsRunning) {
+      spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
       SOCKET_CLOSE(m_ClientSocket);
+      m_UnlockState = UnlockState::CONNECT_ERROR;
       numRetries++;
-      connectError++;
       goto socketStart;
     }
 
-    if(connectError > allowedToLog && numRetries < settings.clientConnectRetries) {
-      spdlog::error("Device connection is hanging. (Code={})", SOCKET_LAST_ERROR);
-      SOCKET_CLOSE(m_ClientSocket);
-      m_UnlockState = UnlockState::CONNECT_ERROR;
-      goto socketStart;
-    }
     m_UnlockState = UnlockState::CONNECT_ERROR;
     goto threadEnd;
   }
 
   m_HasConnection = true;
-  std::this_thread::sleep_for(std::chrono::milliseconds(750));
-  if(amountConnected < 3)
-    amountConnected++;
+  now = std::chrono::steady_clock::now();
+  if(now - lastLogTime < std::chrono::seconds(4)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(750));
+  } else {
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+  }
+  if(successfullConnect) {
+    m_UnlockState = UnlockState::CANCELED;
+    goto threadEnd;
+  }
 
   if(!m_OtherClient) {
     if(otherClientConnectedFirst) {
