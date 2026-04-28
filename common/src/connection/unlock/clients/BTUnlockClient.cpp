@@ -5,8 +5,9 @@
 #include "storage/AppSettings.h"
 
 #ifdef WINDOWS
-#include <windows.h>
+#include <Ws2tcpip.h>
 #include <ws2bth.h>
+
 #define AF_BLUETOOTH AF_BTH
 #define BTPROTO_RFCOMM BTHPROTO_RFCOMM
 #elif LINUX
@@ -112,12 +113,15 @@ socketStart:
     m_UnlockState = UnlockState::UNK_ERROR;
     return;
   }
-  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  std::this_thread::sleep_for(std::chrono::milliseconds(250));
   if(m_OtherClient)
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
   fd_set fdSet{};
   FD_SET(m_ClientSocket, &fdSet);
   struct timeval connectTimeout{};
+  int error = 0;
+  socklen_t errorLen = sizeof(error);
+  connectTimeout.tv_sec = 7;
   
   if(m_OtherClient) {
     now = std::chrono::steady_clock::now();
@@ -127,18 +131,17 @@ socketStart:
     }
   }
 
-  connectTimeout.tv_sec = 7;
   if(!SetSocketRWTimeout(m_ClientSocket, settings.clientSocketTimeout)) {
     spdlog::error("Failed setting R/W timeout for socket. (Code={})", SOCKET_LAST_ERROR);
     m_UnlockState = UnlockState::UNK_ERROR;
     goto threadEnd;
   }
-
   if(!SetSocketBlocking(m_ClientSocket, false)) {
     spdlog::error("Failed setting socket to non-blocking mode. (Code={})", SOCKET_LAST_ERROR);
     m_UnlockState = UnlockState::UNK_ERROR;
     goto threadEnd;
   }
+
   if(connect(m_ClientSocket, reinterpret_cast<struct sockaddr *>(&address), sizeof(address)) < 0) {
     auto error = SOCKET_LAST_ERROR;
     if(error != SOCKET_ERROR_IN_PROGRESS && error != SOCKET_ERROR_WOULD_BLOCK) {
@@ -147,7 +150,6 @@ socketStart:
       goto threadEnd;
     }
   }
-  std::this_thread::sleep_for(std::chrono::milliseconds(250));
   if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &connectTimeout) <= 0) {
     if(numRetries < 2 && m_IsRunning) {
       spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
@@ -161,13 +163,23 @@ socketStart:
     goto threadEnd;
   }
 
-  m_HasConnection = true;
-  now = std::chrono::steady_clock::now();
-  if(now - lastLogTime < std::chrono::seconds(4)) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(750));
-  } else {
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+  if (getsockopt(m_ClientSocket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&error), &errorLen) < 0) {
+    spdlog::error("getsockopt(SO_ERROR) failed. (Code={})", SOCKET_LAST_ERROR);
+    m_UnlockState = UnlockState::UNK_ERROR;
+    goto threadEnd;
   }
+  if (error != 0) {
+    spdlog::error("getsockopt(SO_ERROR) returned an error. (Code={}, Retry={})", error, numRetries);
+    if(numRetries < settings.clientConnectRetries && m_IsRunning) {
+      SOCKET_CLOSE(m_ClientSocket);
+      numRetries++;
+      goto socketStart;
+    }
+    m_UnlockState = UnlockState::CONNECT_ERROR;
+    goto threadEnd;
+  }
+
+  m_HasConnection = true;
   if(successfullConnect) {
     m_UnlockState = UnlockState::CANCELED;
     goto threadEnd;
