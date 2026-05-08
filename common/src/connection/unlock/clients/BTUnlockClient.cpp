@@ -3,6 +3,7 @@
 #include "connection/SocketDefs.h"
 #include "platform/BluetoothHelper.h"
 #include "storage/AppSettings.h"
+using TimePoint = std::chrono::steady_clock::time_point;
 
 #ifdef WINDOWS
 #include <Ws2tcpip.h>
@@ -15,19 +16,67 @@
 #include <bluetooth/rfcomm.h>
 #endif
 
-BTUnlockClient::BTUnlockClient(const std::string &deviceAddress, const PairedDevice &device) : BaseUnlockConnection(device) {
+bool BTUnlockClient::isAlreadyConnected = false;
+bool BTUnlockClient::otherClientConnectedFirst = false;
+bool BTUnlockClient::hasConnected = false;
+bool BTUnlockClient::delayConnect = false;
+bool BTUnlockClient::successfullConnect = false;
+bool BTUnlockClient::credentialSwitch = false;
+std::string BTUnlockClient::firstClientUsername = "";
+std::string BTUnlockClient::lastRememberedUsername = "";
+std::string BTUnlockClient::secondClientUsername = "";
+std::chrono::steady_clock::time_point globalLastLogTime = std::chrono::steady_clock::now();
+
+BTUnlockClient::BTUnlockClient(const std::string &deviceAddress, const PairedDevice &device, const bool &otherClient) : BaseUnlockConnection(device) {
   m_DeviceAddress = deviceAddress;
   m_Channel = -1;
   m_ClientSocket = (SOCKET)-1;
   m_IsRunning = false;
+  m_OtherClient = otherClient;
 }
 
 bool BTUnlockClient::Start() {
   if(m_IsRunning)
     return true;
 
+  if(isAlreadyConnected)
+    isAlreadyConnected = false;
+  if(otherClientConnectedFirst)
+    otherClientConnectedFirst = false;
+  if(hasConnected)
+    hasConnected = false;
+  if(successfullConnect)
+    successfullConnect = false;
+
+  if(!m_OtherClient) {
+    firstClientUsername = m_AuthUser;
+  } else {
+    secondClientUsername = m_AuthUser;
+  }
+
+  if(lastRememberedUsername != "") {
+    if(!m_OtherClient) {
+      if(lastRememberedUsername == firstClientUsername) {
+        credentialSwitch = true;
+        delayConnect = false;
+      } else {
+        credentialSwitch = false;
+        delayConnect = true;
+      }
+    } else {
+      if(lastRememberedUsername == secondClientUsername) {
+        credentialSwitch = true;
+        delayConnect = false;
+      } else {
+        credentialSwitch = false;
+        delayConnect = true;
+      }
+    }
+  }
   WSA_STARTUP
   m_IsRunning = true;
+  if(delayConnect)
+    std::this_thread::sleep_for(std::chrono::milliseconds(750));
   m_AcceptThread = std::thread(&BTUnlockClient::ConnectThread, this);
   return true;
 }
@@ -38,6 +87,28 @@ void BTUnlockClient::Stop() {
 
   if(m_ClientSocket != -1 && m_HasConnection)
     write(m_ClientSocket, "CLOSE", 5);
+  
+  if(m_UnlockState != UnlockState::SUCCESS && !successfullConnect) {
+    if(credentialSwitch) {
+      if(m_OtherClient) {
+        if(!isAlreadyConnected) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(2750));
+          credentialSwitch = false;
+        }
+      } else {
+        if(!otherClientConnectedFirst) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(2750));
+          credentialSwitch = false;
+        }
+      }
+    }
+    {
+      auto now = std::chrono::steady_clock::now();
+      std::lock_guard<std::mutex> lock(globalTimeMutexLastLogTime);
+      if(now - globalLastLogTime < std::chrono::milliseconds(1500) && !hasConnected)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    }
+  }
 
   m_IsRunning = false;
   m_HasConnection = false;
@@ -47,6 +118,10 @@ void BTUnlockClient::Stop() {
 }
 
 void BTUnlockClient::ConnectThread() {
+  {
+    std::lock_guard<std::mutex> lock(globalTimeMutexLastLogTime);
+    globalLastLogTime = std::chrono::steady_clock::now();
+  }
   uint32_t numRetries{};
   auto settings = AppSettings::Get();
   spdlog::info("Connecting via BT...");
@@ -78,6 +153,11 @@ void BTUnlockClient::ConnectThread() {
 #endif
 
 socketStart:
+  if(m_UnlockState == UnlockState::CONNECT_ERROR) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    m_UnlockState = UnlockState::UNKNOWN;
+  }
+
   if((m_ClientSocket = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM)) == SOCKET_INVALID) {
     spdlog::error("socket(AF_BLUETOOTH) failed. (Code={})", SOCKET_LAST_ERROR);
     m_IsRunning = false;
@@ -88,9 +168,10 @@ socketStart:
   fd_set fdSet{};
   FD_SET(m_ClientSocket, &fdSet);
   struct timeval connectTimeout{};
-  connectTimeout.tv_sec = (long)settings.clientConnectTimeout;
   int error = 0;
   socklen_t errorLen = sizeof(error);
+  connectTimeout.tv_sec = 6;
+
   if(!SetSocketRWTimeout(m_ClientSocket, settings.clientSocketTimeout)) {
     spdlog::error("Failed setting R/W timeout for socket. (Code={})", SOCKET_LAST_ERROR);
     m_UnlockState = UnlockState::UNK_ERROR;
@@ -101,7 +182,9 @@ socketStart:
     m_UnlockState = UnlockState::UNK_ERROR;
     goto threadEnd;
   }
-
+  std::this_thread::sleep_for(std::chrono::milliseconds(250));
+  if(m_OtherClient)
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
   if(connect(m_ClientSocket, reinterpret_cast<struct sockaddr *>(&address), sizeof(address)) < 0) {
     auto error = SOCKET_LAST_ERROR;
     if(error != SOCKET_ERROR_IN_PROGRESS && error != SOCKET_ERROR_WOULD_BLOCK) {
@@ -110,13 +193,19 @@ socketStart:
       goto threadEnd;
     }
   }
+  if(credentialSwitch) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(3125));
+    credentialSwitch = false;
+  }
   if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &connectTimeout) <= 0) {
-    spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
-    if(numRetries < settings.clientConnectRetries && m_IsRunning) {
+    if(numRetries <= 5 && m_IsRunning) {
+      spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
       SOCKET_CLOSE(m_ClientSocket);
+      m_UnlockState = UnlockState::CONNECT_ERROR;
       numRetries++;
       goto socketStart;
     }
+
     m_UnlockState = UnlockState::CONNECT_ERROR;
     goto threadEnd;
   }
@@ -130,6 +219,7 @@ socketStart:
     spdlog::error("getsockopt(SO_ERROR) returned an error. (Code={}, Retry={})", error, numRetries);
     if(numRetries < settings.clientConnectRetries && m_IsRunning) {
       SOCKET_CLOSE(m_ClientSocket);
+      m_UnlockState = UnlockState::CONNECT_ERROR;
       numRetries++;
       goto socketStart;
     }
@@ -137,8 +227,38 @@ socketStart:
     goto threadEnd;
   }
 
+  if(successfullConnect) {
+    m_UnlockState = UnlockState::CANCELED;
+    goto threadEnd;
+  }
+
+  if(!m_OtherClient) {
+    if(otherClientConnectedFirst) {
+      m_UnlockState = UnlockState::CANCELED;
+      goto threadEnd;
+    } else {
+      isAlreadyConnected = true;
+    }
+  } else {
+    if(isAlreadyConnected) {
+      m_UnlockState = UnlockState::CANCELED;
+      goto threadEnd;
+    } else {
+      otherClientConnectedFirst = true;
+    }
+  }
+
+  if(!m_OtherClient) {
+    lastRememberedUsername = firstClientUsername;
+  } else {
+    lastRememberedUsername = secondClientUsername;
+  }
   m_HasConnection = true;
+  hasConnected = true;
+  spdlog::info("Connection established!");
   PerformAuthFlow(m_ClientSocket);
+  if(m_UnlockState == UnlockState::SUCCESS)
+    successfullConnect = true;
 
 threadEnd:
   m_IsRunning = false;
