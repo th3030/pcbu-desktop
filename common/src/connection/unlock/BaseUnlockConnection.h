@@ -33,6 +33,8 @@ public:
   PairedDevice GetDevice();
   PacketUnlockResponseData GetResponseData();
   [[nodiscard]] bool HasClient() const;
+  bool IsRunning();
+  bool isOtherClient();
 
   void SetUnlockInfo(const std::string &authUser, const std::string &authProgram);
   UnlockState PollResult();
@@ -50,6 +52,7 @@ protected:
   std::thread m_AcceptThread{};
   std::atomic<bool> m_HasConnection{};
   std::string m_UserName{};
+  bool m_OtherClient{};
 
   std::atomic<UnlockState> m_UnlockState{};
   PairedDevice m_PairedDevice{};
