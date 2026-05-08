@@ -7,7 +7,7 @@ import PCBioUnlock
 
 ApplicationWindow {
     id: updaterWindow
-    width: 400
+    width: 600
     height: 250
     minimumWidth: width
     minimumHeight: height
@@ -50,11 +50,7 @@ ApplicationWindow {
             Button {
                 id: downloadButton
                 text: QI18n.Get('download')
-                onClicked: {
-                    downloadButton.enabled = false;
-                    ignoreButton.enabled = false;
-                    UpdaterWindow.OnDownloadClicked(updaterWindow)
-                }
+                enabled: false
             }
             Button {
                 id: ignoreButton
