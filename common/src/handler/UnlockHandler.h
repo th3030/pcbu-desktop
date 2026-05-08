@@ -43,8 +43,10 @@ public:
   UnlockResult GetResult(const std::string &authUser, const std::string &authProgram, std::atomic<bool> *isRunning = nullptr);
 
 private:
-  UnlockResult RunServer(BaseUnlockConnection *connection, UDPBroadcaster *udpBroadcaster, AtomicUnlockResult *currentResult, std::atomic<bool> *isRunning);
-  std::function<void(std::string)> m_PrintMessage{};
+  UnlockResult RunServer(BaseUnlockConnection *connection, AtomicUnlockResult *currentResult, std::atomic<bool> *isRunning);
+  std::function<void (std::string)> m_PrintMessage{};
+  static bool otherClientConnectedFirst;
+  static bool netDownError;
 };
 
 #endif // PAM_PCBIOUNLOCK_UNLOCKHANDLER_H
