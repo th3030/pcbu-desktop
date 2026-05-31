@@ -78,8 +78,8 @@ if [[ "$PLATFORM" == "win" ]]; then
         echo "No replacement found for $dll_file"
       fi
     done
-    rm installer_dir/D3Dcompiler_47.dll
-    rm installer_dir/opengl32sw.dll
+    rm -f installer_dir/D3Dcompiler_47.dll
+    rm -f installer_dir/opengl32sw.dll
   fi
 
   iscc ../win/installer.iss

@@ -27,11 +27,12 @@ jobs:
           host: "windows"
           target: "desktop"
           arch: "win64_msvc2022_64"
+          aqtsource: git+https://github.com/miurahr/aqtinstall.git@refs/pull/1000/head
           cache: "true"
           cache-key-prefix: "qt-x64"
 
       - name: vcpkg build x64
-        uses: johnwason/vcpkg-action@v7
+        uses: johnwason/vcpkg-action@v8
         with:
           pkgs: openssl
           triplet: x64-windows-static
@@ -39,7 +40,7 @@ jobs:
           cache-key: "vcpkg-x64"
 
       - name: Build x64
-        run: bash -c "cd pkg && chmod +x build-desktop.sh && ARCH=x64 QT_BASE_DIR=C:/Qt/${{env.QT_VERSION}} ./build-desktop.sh"
+        run: bash -c "cd pkg && chmod +x build-desktop.sh && OSTYPE=msys ARCH=x64 QT_BASE_DIR=C:/Qt/${{env.QT_VERSION}} ./build-desktop.sh"
         env:
           VCPKG_ROOT: ${{github.workspace}}/vcpkg
 
@@ -95,11 +96,12 @@ jobs:
           host: "windows"
           target: "desktop"
           arch: "win64_msvc2022_arm64_cross_compiled"
+          aqtsource: git+https://github.com/miurahr/aqtinstall.git@refs/pull/1000/head
           cache: "true"
           cache-key-prefix: "qt-arm64"
 
       - name: vcpkg build arm64
-        uses: johnwason/vcpkg-action@v7
+        uses: johnwason/vcpkg-action@v8
         with:
           pkgs: openssl
           triplet: arm64-windows-static
@@ -107,7 +109,7 @@ jobs:
           cache-key: "vcpkg-arm64"
 
       - name: Build arm64
-        run: bash -c "cd pkg && rm -Rf ./build/ && ARCH=arm64 QT_BASE_DIR=C:/Qt/${{env.QT_VERSION}} ./build-desktop.sh"
+        run: bash -c "cd pkg && rm -Rf ./build/ && OSTYPE=msys ARCH=arm64 QT_BASE_DIR=C:/Qt/${{env.QT_VERSION}} ./build-desktop.sh"
         env:
           VCPKG_ROOT: ${{github.workspace}}/vcpkg
 
