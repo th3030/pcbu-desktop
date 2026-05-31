@@ -22,6 +22,10 @@ private:
   static bool isAlreadyConnected;
   static bool otherClientConnectedFirst;
   static bool successfullConnect;
+  static bool credentialSwitch;
+  static std::string firstClientUsername;
+  static std::string lastRememberedUsername;
+  static std::string secondClientUsername;
 };
 
 #endif

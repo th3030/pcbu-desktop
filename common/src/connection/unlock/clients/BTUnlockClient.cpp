@@ -18,6 +18,10 @@
 bool BTUnlockClient::isAlreadyConnected = false;
 bool BTUnlockClient::otherClientConnectedFirst = false;
 bool BTUnlockClient::successfullConnect = false;
+bool BTUnlockClient::credentialSwitch = false;
+std::string BTUnlockClient::firstClientUsername = "";
+std::string BTUnlockClient::lastRememberedUsername = "";
+std::string BTUnlockClient::secondClientUsername = "";
 
 BTUnlockClient::BTUnlockClient(const std::string &deviceAddress, const PairedDevice &device, const bool &otherClient) : BaseUnlockConnection(device) {
   m_DeviceAddress = deviceAddress;
@@ -38,6 +42,27 @@ bool BTUnlockClient::Start() {
   if(successfullConnect)
     successfullConnect = false;
 
+  if(!m_OtherClient) {
+    firstClientUsername = m_AuthUser;
+  } else {
+    secondClientUsername = m_AuthUser;
+  }
+
+  if(lastRememberedUsername != "") {
+    if(!m_OtherClient) {
+      if(lastRememberedUsername == firstClientUsername) {
+        credentialSwitch = true;
+      } else {
+        credentialSwitch = false;
+      }
+    } else {
+      if(lastRememberedUsername == secondClientUsername) {
+        credentialSwitch = true;
+      } else {
+        credentialSwitch = false;
+      }
+    }
+  }
   WSA_STARTUP
   m_IsRunning = true;
   std::this_thread::sleep_for(std::chrono::milliseconds(250));
@@ -51,13 +76,20 @@ void BTUnlockClient::Stop() {
 
   if(m_ClientSocket != -1 && m_HasConnection)
     write(m_ClientSocket, "CLOSE", 5);
+  
   if(m_UnlockState != UnlockState::SUCCESS && !successfullConnect) {
-    if(m_OtherClient) {
-      if(!isAlreadyConnected)
-        std::this_thread::sleep_for(std::chrono::milliseconds(2250));
-    } else {
-      if(!otherClientConnectedFirst)
-        std::this_thread::sleep_for(std::chrono::milliseconds(2250));
+    if(credentialSwitch) {
+      if(m_OtherClient) {
+        if(!isAlreadyConnected) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(2750));
+          credentialSwitch = false;
+        }
+      } else {
+        if(!otherClientConnectedFirst) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(2750));
+          credentialSwitch = false;
+        }
+      }
     }
   }
 
@@ -103,7 +135,7 @@ void BTUnlockClient::ConnectThread() {
 
 socketStart:
   if(m_UnlockState == UnlockState::CONNECT_ERROR) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     m_UnlockState = UnlockState::UNKNOWN;
   }
 
@@ -113,15 +145,13 @@ socketStart:
     m_UnlockState = UnlockState::UNK_ERROR;
     return;
   }
-  std::this_thread::sleep_for(std::chrono::milliseconds(250));
-  if(m_OtherClient)
-    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+
   fd_set fdSet{};
   FD_SET(m_ClientSocket, &fdSet);
   struct timeval connectTimeout{};
   int error = 0;
   socklen_t errorLen = sizeof(error);
-  connectTimeout.tv_sec = 7;
+  connectTimeout.tv_sec = 10;
   
   if(m_OtherClient) {
     now = std::chrono::steady_clock::now();
@@ -141,7 +171,7 @@ socketStart:
     m_UnlockState = UnlockState::UNK_ERROR;
     goto threadEnd;
   }
-
+  std::this_thread::sleep_for(std::chrono::milliseconds(125));
   if(connect(m_ClientSocket, reinterpret_cast<struct sockaddr *>(&address), sizeof(address)) < 0) {
     auto error = SOCKET_LAST_ERROR;
     if(error != SOCKET_ERROR_IN_PROGRESS && error != SOCKET_ERROR_WOULD_BLOCK) {
@@ -150,8 +180,12 @@ socketStart:
       goto threadEnd;
     }
   }
+  if(credentialSwitch) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1625));
+    credentialSwitch = false;
+  }
   if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &connectTimeout) <= 0) {
-    if(numRetries < 2 && m_IsRunning) {
+    if(numRetries < 3 && m_IsRunning) {
       spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
       SOCKET_CLOSE(m_ClientSocket);
       m_UnlockState = UnlockState::CONNECT_ERROR;
@@ -172,6 +206,7 @@ socketStart:
     spdlog::error("getsockopt(SO_ERROR) returned an error. (Code={}, Retry={})", error, numRetries);
     if(numRetries < settings.clientConnectRetries && m_IsRunning) {
       SOCKET_CLOSE(m_ClientSocket);
+      m_UnlockState = UnlockState::CONNECT_ERROR;
       numRetries++;
       goto socketStart;
     }
@@ -179,7 +214,6 @@ socketStart:
     goto threadEnd;
   }
 
-  m_HasConnection = true;
   if(successfullConnect) {
     m_UnlockState = UnlockState::CANCELED;
     goto threadEnd;
@@ -200,6 +234,13 @@ socketStart:
       otherClientConnectedFirst = true;
     }
   }
+
+  if(!m_OtherClient) {
+    lastRememberedUsername = firstClientUsername;
+  } else {
+    lastRememberedUsername = secondClientUsername;
+  }
+  m_HasConnection = true;
   spdlog::info("Connection established!");
   PerformAuthFlow(m_ClientSocket);
   if(m_UnlockState == UnlockState::SUCCESS)
