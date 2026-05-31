@@ -22,41 +22,26 @@ void BluetoothHelper::StartScan() {}
 void BluetoothHelper::StopScan() {}
 
 std::vector<BluetoothDevice> BluetoothHelper::ScanDevices() {
-  WSADATA data;
-  int result = WSAStartup(MAKEWORD(2, 2), &data);
-  if(result != 0)
+  BLUETOOTH_DEVICE_INFO deviceInfo = {sizeof(deviceInfo)};
+  BLUETOOTH_DEVICE_SEARCH_PARAMS searchParams = {sizeof(searchParams), TRUE, TRUE, TRUE, TRUE, TRUE, 5, nullptr};
+  HANDLE searchHandle = BluetoothFindFirstDevice(&searchParams, &deviceInfo);
+  if(!searchHandle) {
+    auto error = GetLastError();
+    if(error != ERROR_NO_MORE_ITEMS)
+      spdlog::error("Error getting bluetooth search handle. (Code={})", error);
     return {};
-
-  WSAQUERYSETW queryset{};
-  queryset.dwSize = sizeof(WSAQUERYSETW);
-  queryset.dwNameSpace = NS_BTH;
-  HANDLE hLookup;
-  result = WSALookupServiceBeginW(
-      &queryset, LUP_RETURN_NAME | LUP_CONTAINERS | LUP_RETURN_ADDR | LUP_FLUSHCACHE | LUP_RETURN_TYPE | LUP_RETURN_BLOB | LUP_RES_SERVICE, &hLookup);
-  if(result != 0)
-    return {};
-
-  BYTE buffer[4096]{};
-  DWORD bufferLength = sizeof(buffer);
-  auto pResults = reinterpret_cast<WSAQUERYSETW *>(&buffer);
-  auto devices = std::vector<BluetoothDevice>();
-  while(result == 0) {
-    result = WSALookupServiceNextW(
-        hLookup, LUP_RETURN_NAME | LUP_CONTAINERS | LUP_RETURN_ADDR | LUP_FLUSHCACHE | LUP_RETURN_TYPE | LUP_RETURN_BLOB | LUP_RES_SERVICE,
-        &bufferLength, pResults);
-    if(result == 0) {
-      auto pBtAddr = reinterpret_cast<SOCKADDR_BTH *>(pResults->lpcsaBuffer->RemoteAddr.lpSockaddr);
-      char addr[18]{};
-      ba2str(pBtAddr->btAddr, addr);
-      auto name = StringUtils::FromWideString(pResults->lpszServiceInstanceName);
-      auto address = std::string(addr);
-      if(name.empty())
-        name = "Unknown device";
-      devices.push_back({name, address});
-    }
   }
-  WSALookupServiceEnd(hLookup);
-  return devices;
+  std::vector<BluetoothDevice> result{};
+  do {
+    char devAddr[18]{};
+    ba2str(deviceInfo.Address.ullLong, devAddr);
+    auto name = StringUtils::FromWideString(deviceInfo.szName);
+    if(name.empty())
+      name = "Unknown device";
+    result.emplace_back(name, devAddr);
+  } while(BluetoothFindNextDevice(searchHandle, &deviceInfo));
+  BluetoothFindDeviceClose(searchHandle);
+  return result;
 }
 
 bool BluetoothHelper::PairDevice(const BluetoothDevice &device) {
@@ -65,10 +50,10 @@ bool BluetoothHelper::PairDevice(const BluetoothDevice &device) {
   sscanf_s(device.address.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &deviceAddress.rgBytes[5], &deviceAddress.rgBytes[4], &deviceAddress.rgBytes[3],
            &deviceAddress.rgBytes[2], &deviceAddress.rgBytes[1], &deviceAddress.rgBytes[0]);
 
-  BLUETOOTH_DEVICE_SEARCH_PARAMS searchParams = {sizeof(searchParams), TRUE, FALSE, TRUE, TRUE, TRUE, 5, nullptr};
+  BLUETOOTH_DEVICE_SEARCH_PARAMS searchParams = {sizeof(searchParams), TRUE, TRUE, TRUE, TRUE, TRUE, 5, nullptr};
   HANDLE searchHandle = BluetoothFindFirstDevice(&searchParams, &deviceInfo);
   if(!searchHandle) {
-    spdlog::error("Error getting bluetooth search handle.");
+    spdlog::error("Error getting bluetooth search handle. (Code={})", GetLastError());
     return false;
   }
   bool deviceFound = false;

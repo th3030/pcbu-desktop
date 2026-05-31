@@ -46,7 +46,7 @@ FetchContent_Declare(
 )
 FetchContent_Declare(
         cpp_httplib
-        URL https://github.com/yhirose/cpp-httplib/raw/v0.43.1/httplib.h
+        URL https://github.com/yhirose/cpp-httplib/raw/v0.43.3/httplib.h
         DOWNLOAD_NO_EXTRACT TRUE
 )
 FetchContent_Declare(
@@ -56,7 +56,7 @@ FetchContent_Declare(
 )
 FetchContent_Declare(
         Boost
-        URL https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-cmake.7z
+        URL https://github.com/boostorg/boost/releases/download/boost-1.91.0-1/boost-1.91.0-1-cmake.7z
         DOWNLOAD_EXTRACT_TIMESTAMP ON
 )
 
