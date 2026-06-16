@@ -100,6 +100,7 @@ socketStart:
     spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
     if(numRetries < settings.clientConnectRetries && m_IsRunning) {
       SOCKET_CLOSE(m_ClientSocket);
+      m_UnlockState = UnlockState::CONNECT_ERROR;
       numRetries++;
       goto socketStart;
     }
@@ -124,6 +125,8 @@ socketStart:
   }
 
   m_HasConnection = true;
+  spdlog::info("Connection established!");
+  std::this_thread::sleep_for(std::chrono::milliseconds(250));
   PerformAuthFlow(m_ClientSocket);
 
 threadEnd:
