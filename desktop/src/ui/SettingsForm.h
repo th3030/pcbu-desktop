@@ -2,6 +2,7 @@
 #define PCBU_DESKTOP_SETTINGSFORM_H
 
 #include <QObject>
+#include <QStringList>
 #include <QtQmlIntegration>
 
 #include "installer/ServiceInstaller.h"
@@ -17,14 +18,12 @@ public:
     language = QString::fromUtf8(settings.language);
     serverIP = QString::fromUtf8(settings.serverIP);
     serverMAC = QString::fromUtf8(settings.serverMAC);
+    pairingDiscoveryPort = settings.pairingDiscoveryPort;
     pairingServerPort = settings.pairingServerPort;
     unlockServerPort = settings.unlockServerPort;
     clientSocketTimeout = settings.clientSocketTimeout;
     clientConnectTimeout = settings.clientConnectTimeout;
     clientConnectRetries = settings.clientConnectRetries;
-    winWaitForKeyPress = settings.winWaitForKeyPress;
-    winHidePasswordField = settings.winHidePasswordField;
-    unixSetPasswordPAM = settings.unixSetPasswordPAM;
   }
   [[nodiscard]] PCBUAppStorage ToStorage() const {
     auto settings = PCBUAppStorage();
@@ -33,14 +32,12 @@ public:
     settings.language = language.toStdString();
     settings.serverIP = serverIP.toStdString();
     settings.serverMAC = serverMAC.toStdString();
+    settings.pairingDiscoveryPort = pairingDiscoveryPort;
     settings.pairingServerPort = pairingServerPort;
     settings.unlockServerPort = unlockServerPort;
     settings.clientSocketTimeout = clientSocketTimeout;
     settings.clientConnectTimeout = clientConnectTimeout;
     settings.clientConnectRetries = clientConnectRetries;
-    settings.winWaitForKeyPress = winWaitForKeyPress;
-    settings.winHidePasswordField = winHidePasswordField;
-    settings.unixSetPasswordPAM = unixSetPasswordPAM;
     return settings;
   }
 
@@ -49,38 +46,42 @@ public:
   QString language{};
   QString serverIP{};
   QString serverMAC{};
+  uint16_t pairingDiscoveryPort{};
   uint16_t pairingServerPort{};
   uint16_t unlockServerPort{};
   uint32_t clientSocketTimeout{};
   uint32_t clientConnectTimeout{};
   uint32_t clientConnectRetries{};
-  bool winWaitForKeyPress{};
-  bool winHidePasswordField{};
-  bool unixSetPasswordPAM{};
   Q_PROPERTY(QString machineID MEMBER machineID)
   Q_PROPERTY(QString installedVersion MEMBER installedVersion)
   Q_PROPERTY(QString language MEMBER language)
   Q_PROPERTY(QString serverIP MEMBER serverIP)
   Q_PROPERTY(QString serverMAC MEMBER serverMAC)
+  Q_PROPERTY(uint16_t pairingDiscoveryPort MEMBER pairingDiscoveryPort)
   Q_PROPERTY(uint16_t pairingServerPort MEMBER pairingServerPort)
   Q_PROPERTY(uint16_t unlockServerPort MEMBER unlockServerPort)
   Q_PROPERTY(uint32_t clientSocketTimeout MEMBER clientSocketTimeout)
   Q_PROPERTY(uint32_t clientConnectTimeout MEMBER clientConnectTimeout)
   Q_PROPERTY(uint32_t clientConnectRetries MEMBER clientConnectRetries)
-  Q_PROPERTY(bool winWaitForKeyPress MEMBER winWaitForKeyPress)
-  Q_PROPERTY(bool winHidePasswordField MEMBER winHidePasswordField)
-  Q_PROPERTY(bool unixSetPasswordPAM MEMBER unixSetPasswordPAM)
 };
 
 struct ServiceSettingModel {
   Q_GADGET
 public:
+  QString type{};
   QString id{};
   QString name{};
   bool enabled{};
+  QStringList optionNames{};
+  QStringList optionValues{};
+  QString selectedValue{};
+  Q_PROPERTY(QString type MEMBER type)
   Q_PROPERTY(QString id MEMBER id)
   Q_PROPERTY(QString name MEMBER name)
   Q_PROPERTY(bool enabled MEMBER enabled)
+  Q_PROPERTY(QStringList optionNames MEMBER optionNames)
+  Q_PROPERTY(QStringList optionValues MEMBER optionValues)
+  Q_PROPERTY(QString selectedValue MEMBER selectedValue)
 };
 
 class SettingsForm : public QObject {
@@ -98,6 +99,9 @@ public:
   Q_INVOKABLE void SetDebugLoggingEnabled(bool enabled);
 
   Q_INVOKABLE QString GetOperatingSystem();
+
+  Q_INVOKABLE bool HasUDPDevices();
+  Q_INVOKABLE void RemoveUDPDevices();
 
 public slots:
   void Show(QObject *viewLoader);

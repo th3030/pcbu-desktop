@@ -11,6 +11,8 @@
 
 #include "helpers.h"
 #include <intsafe.h>
+#include <lm.h>
+#include <wtsapi32.h>
 
 //
 // Copies the field descriptor pointed to by rcpfd into a buffer allocated
@@ -551,4 +553,87 @@ HRESULT SplitDomainAndUsername(_In_ PCWSTR pszQualifiedUserName, _Outptr_result_
     }
   }
   return hr;
+}
+
+static bool WEqualsIgnoreCase(const std::wstring &a, const std::wstring &b) {
+  return CompareStringOrdinal(a.c_str(), -1, b.c_str(), -1, TRUE) == CSTR_EQUAL;
+}
+
+static std::wstring GetMicrosoftAccountEmail(const std::wstring &userName) {
+  LPUSER_INFO_24 info = nullptr;
+  std::wstring email{};
+  if(NetUserGetInfo(nullptr, userName.c_str(), 24, reinterpret_cast<LPBYTE *>(&info)) == NERR_Success && info != nullptr) {
+    if(info->usri24_internet_identity && info->usri24_internet_principal_name != nullptr)
+      email = info->usri24_internet_principal_name;
+  }
+  if(info != nullptr)
+    NetApiBufferFree(info);
+  return email;
+}
+
+static bool SessionMatchesUser(DWORD sessionId, const std::wstring &domain, const std::wstring &user) {
+  bool match = false;
+  LPWSTR pUser = nullptr;
+  DWORD userBytes = 0;
+  if(WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, sessionId, WTSUserName, &pUser, &userBytes) && pUser) {
+    if(pUser[0] != L'\0') {
+      if(WEqualsIgnoreCase(domain, L"MicrosoftAccount")) {
+        const auto email = GetMicrosoftAccountEmail(pUser);
+        match = !email.empty() && WEqualsIgnoreCase(email, user);
+      } else if(WEqualsIgnoreCase(pUser, user)) {
+        LPWSTR pDomain = nullptr;
+        DWORD domainBytes = 0;
+        if(WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, sessionId, WTSDomainName, &pDomain, &domainBytes) && pDomain) {
+          match = WEqualsIgnoreCase(pDomain, domain);
+          WTSFreeMemory(pDomain);
+        } else {
+          match = true;
+        }
+      }
+    }
+    WTSFreeMemory(pUser);
+  }
+  return match;
+}
+
+static LONGLONG GetSessionLogonTimeSeconds(DWORD sessionId) {
+  LPWSTR pInfo = nullptr;
+  DWORD infoBytes = 0;
+  LONGLONG seconds = 0;
+  if(WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, sessionId, WTSSessionInfo, &pInfo, &infoBytes) && pInfo) {
+    const auto info = reinterpret_cast<PWTSINFOW>(pInfo);
+    if(info->LogonTime.QuadPart > 0) {
+      FILETIME ftNow{};
+      GetSystemTimeAsFileTime(&ftNow);
+      ULARGE_INTEGER now{};
+      now.LowPart = ftNow.dwLowDateTime;
+      now.HighPart = ftNow.dwHighDateTime;
+      if(static_cast<LONGLONG>(now.QuadPart) >= info->LogonTime.QuadPart)
+        seconds = (static_cast<LONGLONG>(now.QuadPart) - info->LogonTime.QuadPart) / 10000000LL;
+    }
+    WTSFreeMemory(pInfo);
+  }
+  return seconds;
+}
+
+bool IsUserLoggedOn(const std::wstring &userDomain, LONGLONG minLogonTimeSecs) {
+  const auto sep = userDomain.find(L'\\');
+  if(sep == std::wstring::npos)
+    return false;
+  const std::wstring domain = userDomain.substr(0, sep);
+  const std::wstring user = userDomain.substr(sep + 1);
+
+  PWTS_SESSION_INFOW pSessions = nullptr;
+  DWORD count = 0;
+  if(!WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &pSessions, &count))
+    return false;
+
+  bool loggedOn = false;
+  for(DWORD i = 0; i < count && !loggedOn; i++) {
+    const auto &session = pSessions[i];
+    if(SessionMatchesUser(session.SessionId, domain, user) && GetSessionLogonTimeSeconds(session.SessionId) >= minLogonTimeSecs)
+      loggedOn = true;
+  }
+  WTSFreeMemory(pSessions);
+  return loggedOn;
 }

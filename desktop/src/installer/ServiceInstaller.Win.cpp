@@ -28,20 +28,34 @@ ServiceInstaller::ServiceInstaller(const std::function<void(const std::string &)
 }
 
 std::vector<ServiceSetting> ServiceInstaller::GetSettings() {
-  return {{"waitForKey", I18n::Get("service_setting_wait_for_key"), AppSettings::Get().winWaitForKeyPress, true},
-  {"hidePasswordField", I18n::Get("service_setting_hide_pw_field"), AppSettings::Get().winHidePasswordField, false}};
+  return {
+      {"unlockBehavior", I18n::Get("service_setting_unlock_behavior"),
+       {
+           {"foreground_lock_only", I18n::Get("unlock_behavior_foreground_lock_only")},
+           {"foreground_always", I18n::Get("unlock_behavior_foreground_always")},
+           {"key_press_lock_only", I18n::Get("unlock_behavior_key_press_lock_only")},
+           {"key_press", I18n::Get("unlock_behavior_key_press")},
+           {"none", I18n::Get("unlock_behavior_none")},
+       },
+       AppSettings::Get().winUnlockBehavior, "key_press_lock_only"},
+      {"hidePasswordField", I18n::Get("service_setting_hide_pw_field"), AppSettings::Get().winHidePasswordField, false},
+      {"forceCredProv", I18n::Get("service_setting_force_cred_prov"), AppSettings::Get().winForceDefaultCredProv, true},
+  };
 }
 
 void ServiceInstaller::ApplySettings(const std::vector<ServiceSetting> &settings, bool useDefault) {
   for(auto setting : settings) {
-    auto isEnabled = useDefault ? setting.defaultVal : setting.enabled;
-    if(setting.id == "waitForKey") {
+    if(setting.id == "unlockBehavior") {
       auto storage = AppSettings::Get();
-      storage.winWaitForKeyPress = isEnabled;
+      storage.winUnlockBehavior = useDefault ? setting.defaultValue : setting.selectedValue;
       AppSettings::Save(storage);
     } else if(setting.id == "hidePasswordField") {
       auto storage = AppSettings::Get();
-      storage.winHidePasswordField = isEnabled;
+      storage.winHidePasswordField = useDefault ? setting.defaultVal : setting.enabled;
+      AppSettings::Save(storage);
+    } else if(setting.id == "forceCredProv") {
+      auto storage = AppSettings::Get();
+      storage.winForceDefaultCredProv = useDefault ? setting.defaultVal : setting.enabled;
       AppSettings::Save(storage);
     } else {
       spdlog::warn("Unknown service setting {}.", setting.id);
@@ -89,7 +103,7 @@ void ServiceInstaller::Install() {
                                            APP_FIREWALL_RULE_NAME, exePath))
                  .exitCode == 0;
     if(!result)
-      m_Logger(I18n::Get("warning_firewall_rule_add", "Windows Firewall (PC Bio Unlock)"));
+      m_Logger(I18n::Get("error_firewall_rule_add", "Windows Firewall (PC Bio Unlock)"));
   } else {
     m_Logger("Warning: App path not found. Skipped adding firewall rule.");
   }
@@ -102,7 +116,7 @@ void ServiceInstaller::Install() {
                                          LOGONUI_FIREWALL_RULE_NAME, logonUiPath.string()))
                .exitCode == 0;
   if(!result)
-    m_Logger(I18n::Get("warning_firewall_rule_add", "Windows Firewall (LogonUI)"));
+    m_Logger(I18n::Get("error_firewall_rule_add", "Windows Firewall (LogonUI)"));
 
   m_Logger("Setting default credential provider...");
   for(auto device : PairedDevicesStorage::GetDevices()) {
@@ -131,9 +145,9 @@ void ServiceInstaller::Uninstall() {
   m_Logger("Removing Windows firewall rules...");
   result = Shell::RunCommand(fmt::format(R"(netsh advfirewall firewall delete rule name="{0}")", APP_FIREWALL_RULE_NAME)).exitCode == 0;
   if(!result)
-    m_Logger(I18n::Get("warning_firewall_rule_remove", "Windows Firewall (PC Bio Unlock)"));
+    m_Logger(I18n::Get("error_firewall_rule_remove", "Windows Firewall (PC Bio Unlock)"));
   result = Shell::RunCommand(fmt::format(R"(netsh advfirewall firewall delete rule name="{0}")", LOGONUI_FIREWALL_RULE_NAME)).exitCode == 0;
   if(!result)
-    m_Logger(I18n::Get("warning_firewall_rule_remove", "Windows Firewall (LogonUI)"));
+    m_Logger(I18n::Get("error_firewall_rule_remove", "Windows Firewall (LogonUI)"));
   m_Logger("Done.");
 }

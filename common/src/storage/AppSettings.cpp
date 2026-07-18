@@ -52,14 +52,16 @@ PCBUAppStorage AppSettings::Load() {
     settings.language = json["language"];
     settings.serverIP = json["serverIP"];
     settings.serverMAC = json["serverMAC"];
+    settings.pairingDiscoveryPort = json.value("pairingDiscoveryPort", 43297);
     settings.pairingServerPort = json["pairingServerPort"];
     settings.unlockServerPort = json["unlockServerPort"];
     settings.clientSocketTimeout = json["clientSocketTimeout"];
     settings.clientConnectTimeout = json["clientConnectTimeout"];
     settings.clientConnectRetries = json["clientConnectRetries"];
 
-    settings.winWaitForKeyPress = json["winWaitForKeyPress"];
+    settings.winUnlockBehavior = json.value("winUnlockBehavior", "key_press_lock_only");
     settings.winHidePasswordField = json["winHidePasswordField"];
+    settings.winForceDefaultCredProv = json.value("winForceDefaultCredProv", true);
     settings.unixSetPasswordPAM = json["unixSetPasswordPAM"];
     if(save) {
       g_Mutex.unlock();
@@ -73,14 +75,16 @@ PCBUAppStorage AppSettings::Load() {
     def.machineID = machineID.empty() ? StringUtils::RandomString(32) : machineID;
     def.language = "auto";
     def.serverIP = "auto";
+    def.pairingDiscoveryPort = 43297;
     def.pairingServerPort = 43295;
     def.unlockServerPort = 43296;
     def.clientSocketTimeout = 120;
     def.clientConnectTimeout = 5;
     def.clientConnectRetries = 2;
 
-    def.winWaitForKeyPress = true;
+    def.winUnlockBehavior = "key_press_lock_only";
     def.winHidePasswordField = false;
+    def.winForceDefaultCredProv = true;
     def.unixSetPasswordPAM = false;
     g_Mutex.unlock();
     Save(def);
@@ -98,14 +102,16 @@ void AppSettings::Save(const PCBUAppStorage &storage) {
         {"language", storage.language},
         {"serverIP", storage.serverIP},
         {"serverMAC", storage.serverMAC},
+        {"pairingDiscoveryPort", storage.pairingDiscoveryPort},
         {"pairingServerPort", storage.pairingServerPort},
         {"unlockServerPort", storage.unlockServerPort},
         {"clientSocketTimeout", storage.clientSocketTimeout},
         {"clientConnectTimeout", storage.clientConnectTimeout},
         {"clientConnectRetries", storage.clientConnectRetries},
 
-        {"winWaitForKeyPress", storage.winWaitForKeyPress},
+        {"winUnlockBehavior", storage.winUnlockBehavior},
         {"winHidePasswordField", storage.winHidePasswordField},
+        {"winForceDefaultCredProv", storage.winForceDefaultCredProv},
         {"unixSetPasswordPAM", storage.unixSetPasswordPAM},
     };
     auto baseDir = GetBaseDir();

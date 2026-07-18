@@ -4,7 +4,6 @@
 #include "connection/unlock/clients/BTUnlockClient.h"
 #include "connection/unlock/clients/TCPUnlockClient.h"
 #include "connection/unlock/servers/TCPUnlockServer.h"
-#include "platform/NetworkHelper.h"
 #include "storage/AppSettings.h"
 
 #ifdef WINDOWS
@@ -28,13 +27,12 @@ UnlockHandler::UnlockHandler(const std::function<void(std::string)> &printMessag
 
 UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::string &authProgram, std::atomic<bool> *isRunning) {
   auto settings = AppSettings::Get();
-  auto netIf = NetworkHelper::GetSavedNetworkInterface();
   auto devices = PairedDevicesStorage::GetDevicesForUser(authUser);
   auto hasTCPServer = false;
   if(otherClientConnectedFirst)
     otherClientConnectedFirst = false;
 
-  UDPBroadcaster *udpBroadcaster{};
+  UDPUnlockBroadcaster *udpBroadcaster{};
   std::vector<BaseUnlockConnection *> connections{};
   for(const auto &device : devices) {
     BaseUnlockConnection *connection{};
@@ -50,7 +48,7 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
       case PairingMethod::MANUAL_UDP:
       case PairingMethod::UDP: {
         if(udpBroadcaster == nullptr)
-          udpBroadcaster = new UDPBroadcaster();
+          udpBroadcaster = new UDPUnlockBroadcaster();
         auto port = device.pairingMethod == PairingMethod::UDP ? device.udpPort : device.udpManualPort;
         udpBroadcaster->AddDevice(device.id, port, device.pairingMethod == PairingMethod::MANUAL_UDP);
       }
@@ -92,8 +90,8 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
   auto numServers = connections.size();
   threads.reserve(numServers);
   for(auto connection : connections) {
-    threads.emplace_back([this, connection, numServers, isRunning, &currentResult, &completed, &cv, &mutex]() {
-      auto serverResult = RunServer(connection, &currentResult, isRunning);
+    threads.emplace_back([this, connection, numServers, isRunning, &currentResult, &completed, &cv, &mutex, udpBroadcaster]() {
+      auto serverResult = RunServer(connection, udpBroadcaster, &currentResult, isRunning);
       completed.fetch_add(1);
       if(serverResult.state == UnlockState::SUCCESS)
         currentResult.store(serverResult);
@@ -130,15 +128,16 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
   return result;
 }
 
-UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUnlockResult *currentResult, std::atomic<bool> *isRunning) {
-  auto lastLogTime = std::chrono::steady_clock::now();
-  auto now = std::chrono::steady_clock::now();
+UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, UDPUnlockBroadcaster *udpBroadcaster, AtomicUnlockResult *currentResult,
+                                      std::atomic<bool> *isRunning) {
   if(!connection->Start()) {
     auto errorMsg = I18n::Get("error_start_handler");
     spdlog::error(errorMsg);
     m_PrintMessage(errorMsg);
     return UnlockResult(UnlockState::START_ERROR);
   }
+  auto lastLogTime = std::chrono::steady_clock::now();
+  auto now = std::chrono::steady_clock::now();
 
   auto connectMessage = I18n::Get(connection->IsServer() ? "wait_server_phone_connect" : "wait_client_phone_connect");
   if(!connection->isOtherClient()) {
@@ -157,16 +156,15 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
       isFutureCancel = true;
       break;
     }
-
     if(connection->HasClient() && isWaitingForConnection) {
       if(connection->isOtherClient())
         otherClientConnectedFirst = true;
 
       m_PrintMessage(I18n::Get("wait_phone_unlock"));
       isWaitingForConnection = false;
-    }
-    if(!connection->isOtherClient() && otherClientConnectedFirst) {
-      m_PrintMessage(I18n::Get("wait_phone_unlock"));
+      if(udpBroadcaster) {
+        udpBroadcaster->Stop();
+      }
     }
 
     state = connection->PollResult();
@@ -198,6 +196,9 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, AtomicUn
       if(!connection->isOtherClient() && !otherClientConnectedFirst)
         m_PrintMessage(connectMessage);
       isWaitingForConnection = true;
+      if(udpBroadcaster) {
+        udpBroadcaster->Start();
+      }
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
   }

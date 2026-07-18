@@ -2,6 +2,7 @@
 
 #include "CSampleProvider.h"
 #include "handler/UnlockHandler.h"
+#include "helpers.h"
 #include "platform/NetworkHelper.h"
 #include "storage/AppSettings.h"
 #include "utils/StringUtils.h"
@@ -65,9 +66,11 @@ void CUnlockListener::ListenThread() {
   auto storage = AppSettings::Get();
   auto devices = PairedDevicesStorage::GetDevices();
   const auto waitForNetwork = std::ranges::any_of(devices, [](const PairedDevice &device) {
-    return device.pairingMethod == PairingMethod::TCP || device.pairingMethod == PairingMethod::CLOUD_TCP;
+    return device.pairingMethod == PairingMethod::TCP || device.pairingMethod == PairingMethod::UDP || device.pairingMethod == PairingMethod::MANUAL_UDP;
   });
   if(m_ProviderUsage == CPUS_LOGON || m_ProviderUsage == CPUS_UNLOCK_WORKSTATION) {
+    const bool isUserLoggedOn = IsUserLoggedOn(m_UserDomain, 15);
+
     // Network
     if(waitForNetwork) {
       m_Credential->UpdateMessage(I18n::Get("wait_network"));
@@ -85,19 +88,34 @@ void CUnlockListener::ListenThread() {
       }
     }
 
-    // Key press
-    if(storage.winWaitForKeyPress && !m_IgnoreWaitKeyPress) {
-      Sleep(500);
-      m_Credential->UpdateMessage(I18n::Get("wait_key_press"));
-      byte lastKeys[KEY_RANGE];
-      GetAllKeyState(lastKeys, KEY_RANGE);
-
-      while(m_IsRunning) {
-        byte keys[KEY_RANGE];
-        GetAllKeyState(keys, KEY_RANGE);
-        if(memcmp(keys, lastKeys, KEY_RANGE) != 0)
-          break;
-        Sleep(10);
+    // Unlock behavior
+    if(!m_IgnoreWaitKeyPress) {
+      const bool isUnlock = m_ProviderUsage == CPUS_UNLOCK_WORKSTATION || (m_ProviderUsage == CPUS_LOGON && isUserLoggedOn);
+      if(storage.winUnlockBehavior == "key_press"  || (storage.winUnlockBehavior == "key_press_lock_only" && isUnlock)) {
+        Sleep(500);
+        m_Credential->UpdateMessage(I18n::Get("wait_key_press"));
+        byte lastKeys[KEY_RANGE];
+        GetAllKeyState(lastKeys, KEY_RANGE);
+        while(m_IsRunning) {
+          byte keys[KEY_RANGE];
+          GetAllKeyState(keys, KEY_RANGE);
+          if(memcmp(keys, lastKeys, KEY_RANGE) != 0)
+            break;
+          Sleep(10);
+        }
+      } else if(storage.winUnlockBehavior == "foreground_always" || (storage.winUnlockBehavior == "foreground_lock_only" && isUnlock)) {
+        // HACK: Might not be 100% reliable
+        DWORD currentProcessId = GetCurrentProcessId();
+        while(m_IsRunning) {
+          if(HWND hwndForeground = GetForegroundWindow()) {
+            DWORD foregroundProcessId = 0;
+            GetWindowThreadProcessId(hwndForeground, &foregroundProcessId);
+            if(foregroundProcessId == currentProcessId) {
+              break;
+            }
+          }
+          Sleep(100);
+        }
       }
     }
   }

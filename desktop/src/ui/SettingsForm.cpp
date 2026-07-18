@@ -1,6 +1,9 @@
 #include "SettingsForm.h"
 
+#include <algorithm>
+
 #include "shell/Shell.h"
+#include "storage/PairedDevicesStorage.h"
 #include "utils/AppInfo.h"
 
 AppSettingsModel SettingsForm::GetSettings() {
@@ -14,19 +17,33 @@ void SettingsForm::SetSettings(const AppSettingsModel &settings) {
 QVariantList SettingsForm::GetServiceSettings() {
   QVariantList result{};
   for(const auto &setting : m_EditServiceSettings) {
-    ServiceSettingModel entry = {QString::fromUtf8(setting.id), QString::fromUtf8(setting.name), setting.enabled};
+    ServiceSettingModel entry{};
+    entry.id = QString::fromUtf8(setting.id);
+    entry.name = QString::fromUtf8(setting.name);
+    entry.enabled = setting.enabled;
+    entry.type = QString::fromUtf8(setting.type);
+    entry.selectedValue = QString::fromUtf8(setting.selectedValue);
+    for(const auto &option : setting.options) {
+      entry.optionNames.append(QString::fromUtf8(option.name));
+      entry.optionValues.append(QString::fromUtf8(option.value));
+    }
     result.append(QVariant::fromValue(entry));
   }
   return result;
 }
 
 void SettingsForm::SetServiceSettings(const QVariantList &settings) {
-  std::vector<ServiceSetting> result{};
   for(const auto &varSetting : settings) {
-    auto setting = varSetting.value<ServiceSettingModel>();
-    result.push_back({setting.id.toStdString(), setting.name.toStdString(), setting.enabled});
+    auto model = varSetting.value<ServiceSettingModel>();
+    auto id = model.id.toStdString();
+    for(auto &setting : m_EditServiceSettings) {
+      if(setting.id != id)
+        continue;
+      setting.enabled = model.enabled;
+      setting.selectedValue = model.selectedValue.toStdString();
+      break;
+    }
   }
-  m_EditServiceSettings = result;
 }
 
 bool SettingsForm::IsDebugLoggingEnabled() {
@@ -45,6 +62,20 @@ void SettingsForm::SetDebugLoggingEnabled(bool enabled) {
 
 QString SettingsForm::GetOperatingSystem() {
   return QString::fromUtf8(AppInfo::GetOperatingSystem());
+}
+
+static bool IsUDPMethod(PairingMethod method) {
+  return method == PairingMethod::UDP || method == PairingMethod::MANUAL_UDP;
+}
+
+bool SettingsForm::HasUDPDevices() {
+  return std::ranges::any_of(PairedDevicesStorage::GetDevices(), [](PairedDevice &device) { return IsUDPMethod(device.pairingMethod); });
+}
+
+void SettingsForm::RemoveUDPDevices() {
+  auto devices = PairedDevicesStorage::GetDevices();
+  std::erase_if(devices, [](const PairedDevice &device) { return IsUDPMethod(device.pairingMethod); });
+  PairedDevicesStorage::SaveDevices(devices);
 }
 
 void SettingsForm::Show(QObject *viewLoader) {

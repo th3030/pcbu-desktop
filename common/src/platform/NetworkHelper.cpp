@@ -1,6 +1,7 @@
 #include "NetworkHelper.h"
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <regex>
@@ -26,6 +27,7 @@
 #include <unistd.h>
 #ifdef LINUX
 #include <netpacket/packet.h>
+#include <sys/stat.h>
 #elif APPLE
 #define AF_PACKET AF_LINK
 #endif
@@ -34,7 +36,7 @@
 std::regex g_LocalIPv4Regex(
     R"((^10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^172\.1[6-9]{1}[0-9]{0,1}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^172\.2[0-9]{1}[0-9]{0,1}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^172\.3[0-1]{1}[0-9]{0,1}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^192\.168\.[0-9]{1,3}\.[0-9]{1,3}$))");
 
-std::vector<NetworkInterface> NetworkHelper::GetLocalNetInterfaces() {
+std::vector<NetworkInterface> NetworkHelper::GetLocalNetInterfaces(bool onlyValid) {
   std::vector<NetworkInterface> result{};
 #ifdef WINDOWS
   ULONG bufferSize = 0;
@@ -57,6 +59,7 @@ std::vector<NetworkInterface> NetworkHelper::GetLocalNetInterfaces() {
     auto netIf = NetworkInterface();
     netIf.ifName = StringUtils::FromWideString(ifName);
     netIf.macAddress = macAddr;
+    netIf.isWired = adapter->IfType == IF_TYPE_ETHERNET_CSMACD;
     for(PIP_ADAPTER_UNICAST_ADDRESS unicast = adapter->FirstUnicastAddress; unicast; unicast = unicast->Next) {
       auto family = unicast->Address.lpSockaddr->sa_family;
       if(family != AF_INET)
@@ -66,6 +69,15 @@ std::vector<NetworkInterface> NetworkHelper::GetLocalNetInterfaces() {
       inet_ntop(AF_INET, &(ipv4->sin_addr), strBuffer, INET_ADDRSTRLEN);
       auto ifAddr = std::string(strBuffer);
       netIf.ipAddress = ifAddr;
+
+      ULONG mask = 0;
+      if(ConvertLengthToIpv4Mask(unicast->OnLinkPrefixLength, &mask) == NO_ERROR) {
+        in_addr maskAddr{};
+        maskAddr.s_addr = mask;
+        char maskBuffer[INET_ADDRSTRLEN]{};
+        inet_ntop(AF_INET, &maskAddr, maskBuffer, INET_ADDRSTRLEN);
+        netIf.netmask = maskBuffer;
+      }
     }
     for(PIP_ADAPTER_GATEWAY_ADDRESS gateway = adapter->FirstGatewayAddress; gateway; gateway = gateway->Next) {
       auto family = gateway->Address.lpSockaddr->sa_family;
@@ -103,9 +115,17 @@ std::vector<NetworkInterface> NetworkHelper::GetLocalNetInterfaces() {
       if(!ifMap.contains(ifName)) {
         ifMap[ifName] = NetworkInterface();
         ifMap[ifName].ifName = ifName;
+        ifMap[ifName].isWired = IsWiredEthernet(ifName);
       }
-      if(family == AF_INET)
+      if(family == AF_INET) {
         ifMap[ifName].ipAddress = addr;
+        if(ifa->ifa_netmask != nullptr) {
+          char maskBuffer[NI_MAXHOST]{};
+          auto maskRes = getnameinfo(ifa->ifa_netmask, sizeof(struct sockaddr_in), maskBuffer, NI_MAXHOST, nullptr, 0, NI_NUMERICHOST);
+          if(maskRes == 0)
+            ifMap[ifName].netmask = maskBuffer;
+        }
+      }
       if(family == AF_PACKET) {
 #ifdef LINUX
         auto sll = reinterpret_cast<struct sockaddr_ll *>(ifa->ifa_addr);
@@ -123,7 +143,22 @@ std::vector<NetworkInterface> NetworkHelper::GetLocalNetInterfaces() {
   freeifaddrs(ifaddr);
 #endif
 
-  auto rankIp = [](const NetworkInterface &netIf) {
+  auto isVirtual = [](const NetworkInterface &netIf) {
+#ifdef WINDOWS
+    return netIf.ifName.contains("Bluetooth") || netIf.ifName.contains("vEthernet") || netIf.ifName.contains("VMware") ||
+           netIf.ifName.contains("VirtualBox") || netIf.ifName.contains("Docker");
+#else
+    return netIf.ifName.starts_with("vir") || netIf.ifName.starts_with("docker") || netIf.ifName.starts_with("ham") ||
+           netIf.ifName.starts_with("bridge");
+#endif
+  };
+
+  if(onlyValid) {
+    std::erase_if(result,
+                  [&isVirtual](const NetworkInterface &netIf) { return isVirtual(netIf) || !std::regex_match(netIf.ipAddress, g_LocalIPv4Regex); });
+  }
+
+  auto rankIp = [&isVirtual](const NetworkInterface &netIf) {
     auto rank = 0;
     if(std::regex_match(netIf.ipAddress, g_LocalIPv4Regex))
       rank += 1000;
@@ -133,14 +168,8 @@ std::vector<NetworkInterface> NetworkHelper::GetLocalNetInterfaces() {
       rank += 50;
     if(netIf.ipAddress.starts_with("169.254."))
       rank -= 10;
-#ifdef WINDOWS
-    if(netIf.ifName.contains("Bluetooth") || netIf.ifName.contains("vEthernet") || netIf.ifName.contains("VMware") ||
-       netIf.ifName.contains("VirtualBox") || netIf.ifName.contains("Docker"))
+    if(isVirtual(netIf))
       rank -= 100;
-#else
-    if(netIf.ifName.starts_with("vir") || netIf.ifName.starts_with("docker") || netIf.ifName.starts_with("ham") || netIf.ifName.starts_with("bridge"))
-      rank -= 100;
-#endif
     return rank;
   };
   std::sort(result.begin(), result.end(), [rankIp](const NetworkInterface &a, const NetworkInterface &b) {
@@ -151,7 +180,8 @@ std::vector<NetworkInterface> NetworkHelper::GetLocalNetInterfaces() {
     return rankA > rankB;
   });
   for(const auto &netIf : result) {
-    spdlog::debug("Network interface: Name='" + netIf.ifName + "' IP='" + netIf.ipAddress + "' Gateway='" + netIf.gateway + "' Rank=" + std::to_string(rankIp(netIf)));
+    spdlog::debug("Network interface: Name='" + netIf.ifName + "' IP='" + netIf.ipAddress + "' Gateway='" + netIf.gateway +
+                  "' Rank=" + std::to_string(rankIp(netIf)));
   }
   return result;
 }
@@ -228,4 +258,59 @@ NetworkInterface NetworkHelper::GetSavedNetworkInterface() {
     result.ipAddress = settings.serverIP;
   }
   return result;
+}
+
+std::vector<NetworkInterface> NetworkHelper::GetWakeOnLanInterfaces() {
+  std::vector<NetworkInterface> result{};
+  for(const auto &netIf : GetLocalNetInterfaces(true)) {
+    if(!netIf.isWired)
+      continue;
+    if(netIf.macAddress.empty() || netIf.macAddress == "00:00:00:00:00:00")
+      continue;
+    spdlog::debug("Wake-on-LAN interface: Name='{}'", netIf.ifName);
+    result.emplace_back(netIf);
+  }
+  return result;
+}
+
+std::vector<BroadcastTarget> NetworkHelper::GetBroadcastTargets() {
+  std::vector<BroadcastTarget> result{};
+  for(const auto &netIf : GetLocalNetInterfaces()) {
+    if(netIf.ipAddress.empty())
+      continue;
+    if(!std::regex_match(netIf.ipAddress, g_LocalIPv4Regex) && !netIf.ipAddress.starts_with("169.254."))
+      continue;
+
+    in_addr ipAddr{};
+    if(inet_pton(AF_INET, netIf.ipAddress.c_str(), &ipAddr) != 1)
+      continue;
+
+    std::string broadcastIP = "255.255.255.255";
+    in_addr maskAddr{};
+    if(!netIf.netmask.empty() && inet_pton(AF_INET, netIf.netmask.c_str(), &maskAddr) == 1) {
+      in_addr bcast{};
+      bcast.s_addr = ipAddr.s_addr | ~maskAddr.s_addr; // directed broadcast = ip | ~mask
+      char buffer[INET_ADDRSTRLEN]{};
+      if(inet_ntop(AF_INET, &bcast, buffer, INET_ADDRSTRLEN) != nullptr)
+        broadcastIP = buffer;
+    }
+    result.emplace_back(BroadcastTarget{netIf.ipAddress, broadcastIP});
+  }
+  return result;
+}
+
+bool NetworkHelper::IsWiredEthernet(const std::string &ifName) {
+#ifdef LINUX
+  auto base = "/sys/class/net/" + ifName;
+  struct stat st{};
+  if(stat((base + "/wireless").c_str(), &st) == 0 || stat((base + "/phy80211").c_str(), &st) == 0)
+    return false; // Wi-Fi
+  if(stat((base + "/device").c_str(), &st) != 0)
+    return false; // virtual adapters have no device
+  std::ifstream typeFile(base + "/type");
+  int type = -1;
+  if(typeFile >> type)
+    return type == 1; // ARPHRD_ETHER
+#endif
+  return false;
 }

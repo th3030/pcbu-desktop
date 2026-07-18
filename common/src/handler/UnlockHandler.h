@@ -7,7 +7,7 @@
 
 #include "UnlockState.h"
 #include "connection/unlock/BaseUnlockConnection.h"
-#include "connection/UDPBroadcaster.h"
+#include "connection/unlock/UDPUnlockBroadcaster.h"
 #include "storage/PairedDevicesStorage.h"
 
 struct UnlockResult {
@@ -43,8 +43,9 @@ public:
   UnlockResult GetResult(const std::string &authUser, const std::string &authProgram, std::atomic<bool> *isRunning = nullptr);
 
 private:
-  UnlockResult RunServer(BaseUnlockConnection *connection, AtomicUnlockResult *currentResult, std::atomic<bool> *isRunning);
-  std::function<void (std::string)> m_PrintMessage{};
+  UnlockResult RunServer(BaseUnlockConnection *connection, UDPUnlockBroadcaster *udpBroadcaster, AtomicUnlockResult *currentResult,
+                         std::atomic<bool> *isRunning);
+  std::function<void(std::string)> m_PrintMessage{};
   static bool otherClientConnectedFirst;
   static bool netDownError;
 };
