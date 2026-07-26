@@ -76,7 +76,7 @@ bool BTUnlockClient::Start() {
   WSA_STARTUP
   m_IsRunning = true;
   if(delayConnect)
-    std::this_thread::sleep_for(std::chrono::milliseconds(750));
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
   m_AcceptThread = std::thread(&BTUnlockClient::ConnectThread, this);
   return true;
 }
@@ -105,8 +105,8 @@ void BTUnlockClient::Stop() {
     {
       auto now = std::chrono::steady_clock::now();
       std::lock_guard<std::mutex> lock(globalTimeMutexLastLogTime);
-      if(now - globalLastLogTime < std::chrono::milliseconds(1500) && !hasConnected)
-        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+      if(now - globalLastLogTime < std::chrono::milliseconds(1750) && !hasConnected)
+        std::this_thread::sleep_for(std::chrono::milliseconds(2250));
     }
   }
 
