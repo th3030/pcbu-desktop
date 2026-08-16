@@ -121,9 +121,9 @@ Enter your administrator password when prompted.
 
 After the application starts:
 
-1. Open the **Desktop UI Installer**.
-2. Complete the installation process.
-3. Restart the application if requested.
+1. Press the **Install** button.
+2. The screen will show the installation progress.
+3. The installation should succeed successfully.
 
 ---
 
