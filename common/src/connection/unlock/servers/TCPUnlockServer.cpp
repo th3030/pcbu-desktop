@@ -1,6 +1,7 @@
 #include "TCPUnlockServer.h"
 
 #include "connection/SocketDefs.h"
+#include "connection/stream/SocketStream.h"
 #include "handler/UnlockState.h"
 #include "storage/AppSettings.h"
 #include "storage/PairedDevicesStorage.h"
@@ -17,16 +18,13 @@ TCPUnlockServer::TCPUnlockServer() : BaseUnlockConnection() {
   m_ServerSocket = SOCKET_INVALID;
 }
 
-bool TCPUnlockServer::IsServer() {
-  return true;
-}
-
 bool TCPUnlockServer::Start() {
   if(m_IsRunning)
     return true;
 
   WSA_STARTUP
   m_IsRunning = true;
+  SetPhase(UnlockPhase::SERVER_WAITING);
   m_AcceptThread = std::thread(&TCPUnlockServer::AcceptThread, this);
   return true;
 }
@@ -36,7 +34,6 @@ void TCPUnlockServer::Stop() {
   if(m_AcceptThread.joinable())
     m_AcceptThread.join();
   m_IsRunning = false;
-  m_HasConnection = false;
 }
 
 void TCPUnlockServer::AcceptThread() {
@@ -119,22 +116,22 @@ threadEnd:
   for(auto &thread : clientThreads)
     if(thread.joinable())
       thread.join();
-  m_HasConnection = false;
   m_IsRunning = false;
   spdlog::info("TCP server stopped.");
 }
 
 void TCPUnlockServer::ClientThread(SOCKET clientSocket) {
   spdlog::info("TCP client connected.");
-  m_HasConnection = true;
   ++m_NumConnections;
   int opt = 1;
   if(setsockopt(clientSocket, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&opt), sizeof(opt))) {
     spdlog::error("setsockopt(TCP_NODELAY) failed. (Code={})", SOCKET_LAST_ERROR);
   }
-  PerformAuthFlow(clientSocket, true);
+  SocketStream stream(clientSocket);
+  PerformAuthFlow(stream, true);
   --m_NumConnections;
-  m_HasConnection = m_NumConnections > 0;
+  if(PollResult() == UnlockState::UNKNOWN)
+    SetPhase(m_NumConnections > 0 ? UnlockPhase::PHONE_UNLOCKING : UnlockPhase::SERVER_WAITING);
   SOCKET_CLOSE(clientSocket);
   spdlog::info("TCP client closed.");
 }

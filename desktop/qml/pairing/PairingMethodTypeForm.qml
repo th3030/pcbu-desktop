@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-import PCBioUnlock
+import PulseUnlock
 import "qrc:/ui/base"
 
 StepForm {
@@ -20,6 +20,20 @@ StepForm {
                     let data = PairingForm.GetData();
                     data.pairingMethodType = button.methodStr;
                     PairingForm.SetData(data);
+                }
+            }
+            ColumnLayout {
+                RadioButton {
+                    ButtonGroup.group: methodRadioGroup
+                    property string methodStr: 'CLOUD'
+                    text: QI18n.Get('pairing_method_type_cloud_select')
+                    checked: PairingForm.GetData().pairingMethodType === methodStr
+                }
+                Label {
+                    Layout.preferredWidth: 500
+                    Layout.leftMargin: 40
+                    text: QI18n.Get('pairing_method_type_cloud_desc')
+                    wrapMode: Label.WordWrap
                 }
             }
             ColumnLayout {

@@ -1,17 +1,24 @@
 #include "ServiceInstaller.h"
 
+#include "EnvHelper.h"
 #include "shell/Shell.h"
 #include "storage/AppSettings.h"
 #include "utils/ResourceHelper.h"
 
 #define EXE_MODULE_DIR std::filesystem::path("/usr/local/sbin/")
 #define EXE_MODULE_FILE "pcbu_auth"
+#define SSH_MODULE_FILE "pcbu_ssh_askpass"
 
 #define PAM_MODULE_DIRS std::vector<std::filesystem::path>{"/lib/security/", "/lib64/security/"}
-#define PAM_MODULE_FILE "pam_pcbiounlock.so"
+#define PAM_MODULE_FILE "pam_pulseunlock.so"
+#define PAM_MODULE_FILE_OLD "pam_pcbiounlock.so"
 
-#define PAM_CONFIG_ENTRY "auth sufficient pam_pcbiounlock.so"
+#define PAM_CONFIG_ENTRY "auth sufficient pam_pulseunlock.so"
 #define PAM_CONFIG_ENTRY_SDDM                                                                                                                        \
+  "auth [success=1 new_authtok_reqd=1 default=ignore] pam_unix.so try_first_pass likeauth nullok\nauth sufficient pam_pulseunlock.so"
+
+#define PAM_CONFIG_ENTRY_OLD "auth sufficient pam_pcbiounlock.so"
+#define PAM_CONFIG_ENTRY_SDDM_OLD                                                                                                                    \
   "auth [success=1 new_authtok_reqd=1 default=ignore] pam_unix.so try_first_pass likeauth nullok\nauth sufficient pam_pcbiounlock.so"
 
 #define UFW_NAME "ufw"
@@ -41,7 +48,8 @@ std::vector<ServiceSetting> ServiceInstaller::GetSettings() {
   return {{"sudo", I18n::Get("service_setting_sudo"), PAMHelper::HasConfigEntry("sudo", PAM_CONFIG_ENTRY), IsProgramInstalled(SUDO_NAME)},
           {"polkit", I18n::Get("service_setting_polkit"), PAMHelper::HasConfigEntry("polkit-1", PAM_CONFIG_ENTRY), IsProgramInstalled(POLKIT_NAME)},
           {"login", I18n::Get("service_setting_login_manager"), isLoginEnabled, hasLoginManager},
-          {"pamSetPassword", I18n::Get("service_setting_pam_set_pw"), AppSettings::Get().unixSetPasswordPAM, false}};
+          {"pamSetPassword", I18n::Get("service_setting_pam_set_pw"), AppSettings::Get().unixSetPasswordPAM, false},
+          {"ssh", I18n::Get("service_setting_ssh"), EnvHelper::IsSshEnabled(), false}};
 }
 
 void ServiceInstaller::ApplySettings(const std::vector<ServiceSetting> &settings, bool useDefault) {
@@ -68,6 +76,8 @@ void ServiceInstaller::ApplySettings(const std::vector<ServiceSetting> &settings
       auto storage = AppSettings::Get();
       storage.unixSetPasswordPAM = isEnabled;
       AppSettings::Save(storage);
+    } else if(setting.id == "ssh") {
+      EnvHelper::SetSshEnabled(isEnabled);
     } else {
       spdlog::warn("Unknown service setting {}.", setting.id);
     }
@@ -75,9 +85,11 @@ void ServiceInstaller::ApplySettings(const std::vector<ServiceSetting> &settings
 }
 
 bool ServiceInstaller::IsInstalled() {
+  if(!std::filesystem::exists(EXE_MODULE_DIR / EXE_MODULE_FILE))
+    return false;
   for(const auto &pamDir : PAM_MODULE_DIRS) {
-    if(std::filesystem::exists(pamDir / PAM_MODULE_FILE))
-      return std::filesystem::exists(EXE_MODULE_DIR / EXE_MODULE_FILE);
+    if(std::filesystem::exists(pamDir / PAM_MODULE_FILE) || std::filesystem::exists(pamDir / PAM_MODULE_FILE_OLD))
+      return true;
   }
   return false;
 }
@@ -103,7 +115,36 @@ void ServiceInstaller::Install() {
     result = Shell::WriteBytes(pamPath, pamModule);
     if(!result)
       throw std::runtime_error(I18n::Get("error_file_write", pamPath.string()));
+
+    // Migration
+    auto oldPamPath = pamDir / PAM_MODULE_FILE_OLD;
+    if(std::filesystem::exists(oldPamPath)) {
+      result = Shell::RemoveFile(oldPamPath);
+      if(!result)
+        throw std::runtime_error(I18n::Get("error_file_remove", oldPamPath.string()));
+    }
   }
+
+  m_Logger("Copying SSH module...");
+  auto askpassExe = ResourceHelper::GetResource(":/res/natives/{}", SSH_MODULE_FILE);
+  auto askpassPath = EXE_MODULE_DIR / SSH_MODULE_FILE;
+  result = Shell::WriteBytes(askpassPath, askpassExe);
+  if(!result)
+    throw std::runtime_error(I18n::Get("error_file_write", askpassPath.string()));
+  result = Shell::RunCommand(fmt::format("chmod +x {0} && chmod u+s {0}", askpassPath.string())).exitCode == 0;
+  if(!result)
+    throw std::runtime_error(I18n::Get("error_exec_setuid", askpassPath.string()));
+
+  // Migration
+  m_PAMHelper.MigrateConfigEntry("sudo", PAM_CONFIG_ENTRY_OLD, PAM_CONFIG_ENTRY);
+  m_PAMHelper.MigrateConfigEntry("polkit-1", PAM_CONFIG_ENTRY_OLD, PAM_CONFIG_ENTRY);
+  m_PAMHelper.MigrateConfigEntry("gdm-password", PAM_CONFIG_ENTRY_OLD, PAM_CONFIG_ENTRY);
+  m_PAMHelper.MigrateConfigEntry("sddm", PAM_CONFIG_ENTRY_SDDM_OLD, PAM_CONFIG_ENTRY_SDDM);
+  m_PAMHelper.MigrateConfigEntry("sddm", PAM_CONFIG_ENTRY_OLD, PAM_CONFIG_ENTRY);
+  m_PAMHelper.MigrateConfigEntry("kde", PAM_CONFIG_ENTRY_OLD, PAM_CONFIG_ENTRY);
+  m_PAMHelper.MigrateConfigEntry("lightdm", PAM_CONFIG_ENTRY_OLD, PAM_CONFIG_ENTRY);
+  m_PAMHelper.MigrateConfigEntry("cinnamon-screensaver", PAM_CONFIG_ENTRY_OLD, PAM_CONFIG_ENTRY);
+  m_PAMHelper.MigrateConfigEntry("hyprlock", PAM_CONFIG_ENTRY_OLD, PAM_CONFIG_ENTRY);
 
   auto settings = AppSettings::Get();
   if(IsProgramInstalled(UFW_NAME)) {
@@ -137,21 +178,54 @@ void ServiceInstaller::Install() {
   m_Logger("Done.");
 }
 
-void ServiceInstaller::Uninstall() {
+void ServiceInstaller::Uninstall(bool fullUninstall) {
   m_Logger("Removing binary module...");
   auto exePath = EXE_MODULE_DIR / EXE_MODULE_FILE;
-  auto result = Shell::RemoveFile(exePath);
-  if(!result)
-    throw std::runtime_error(I18n::Get("error_file_remove", exePath.string()));
+  auto result = true;
+  if(std::filesystem::exists(exePath)) {
+    result = Shell::RemoveFile(exePath);
+    if(!result)
+      throw std::runtime_error(I18n::Get("error_file_remove", exePath.string()));
+  }
 
   m_Logger("Removing PAM module...");
   for(const auto &pamDir : PAM_MODULE_DIRS) {
-    auto pamPath = pamDir / PAM_MODULE_FILE;
-    if(!std::filesystem::exists(pamPath))
-      continue;
-    result = Shell::RemoveFile(pamPath);
+    for(const auto &moduleFile : {PAM_MODULE_FILE, PAM_MODULE_FILE_OLD}) {
+      auto pamPath = pamDir / moduleFile;
+      if(!std::filesystem::exists(pamPath))
+        continue;
+      result = Shell::RemoveFile(pamPath);
+      if(!result)
+        throw std::runtime_error(I18n::Get("error_file_remove", pamPath.string()));
+    }
+  }
+
+  m_Logger("Removing SSH module...");
+  auto askpassPath = EXE_MODULE_DIR / SSH_MODULE_FILE;
+  if(std::filesystem::exists(askpassPath)) {
+    result = Shell::RemoveFile(askpassPath);
     if(!result)
-      throw std::runtime_error(I18n::Get("error_file_remove", pamPath.string()));
+      throw std::runtime_error(I18n::Get("error_file_remove", askpassPath.string()));
+  }
+
+  if(fullUninstall) {
+    m_Logger("Removing PAM configuration...");
+    for(const auto &entry : {PAM_CONFIG_ENTRY_SDDM, PAM_CONFIG_ENTRY_SDDM_OLD})
+      m_PAMHelper.SetConfigEntry("sddm", entry, false);
+    for(const auto &entry : {PAM_CONFIG_ENTRY, PAM_CONFIG_ENTRY_OLD}) {
+      m_PAMHelper.SetConfigEntry("sudo", entry, false);
+      m_PAMHelper.SetConfigEntry("polkit-1", entry, false);
+      m_PAMHelper.SetConfigEntry("gdm-password", entry, false);
+      m_PAMHelper.SetConfigEntry("sddm", entry, false);
+      m_PAMHelper.SetConfigEntry("kde", entry, false);
+      m_PAMHelper.SetConfigEntry("lightdm", entry, false);
+      m_PAMHelper.SetConfigEntry("cinnamon-screensaver", entry, false);
+      m_PAMHelper.SetConfigEntry("hyprlock", entry, false);
+    }
+    if(EnvHelper::IsSshEnabled()) {
+      m_Logger("Removing SSH integration...");
+      EnvHelper::SetSshEnabled(false);
+    }
   }
 
   auto settings = AppSettings::Get();

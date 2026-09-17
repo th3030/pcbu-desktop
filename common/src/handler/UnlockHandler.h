@@ -4,6 +4,7 @@
 #include <functional>
 #include <future>
 #include <string>
+#include <vector>
 
 #include "UnlockState.h"
 #include "connection/unlock/BaseUnlockConnection.h"
@@ -19,6 +20,7 @@ struct UnlockResult {
   UnlockState state{};
   PairedDevice device{};
   std::string password{};
+  std::string passwordKey{};
 };
 
 class AtomicUnlockResult {
@@ -40,14 +42,24 @@ private:
 class UnlockHandler {
 public:
   explicit UnlockHandler(const std::function<void(std::string)> &printMessage);
-  UnlockResult GetResult(const std::string &authUser, const std::string &authProgram, std::atomic<bool> *isRunning = nullptr);
+  UnlockResult GetResult(const std::string &authUser, const std::string &authProgram, const std::vector<std::string> &deviceIds = {},
+                         std::atomic<bool> *isRunning = nullptr);
 
 private:
   UnlockResult RunServer(BaseUnlockConnection *connection, UDPUnlockBroadcaster *udpBroadcaster, AtomicUnlockResult *currentResult,
                          std::atomic<bool> *isRunning);
+
+  void PrintStatus(const BaseUnlockConnection *owner, UnlockPhase phase);
+  void PrintStatus(const std::string &message);
+
   std::function<void(std::string)> m_PrintMessage{};
   static bool otherClientConnectedFirst;
   static bool netDownError;
+  std::mutex m_StatusMutex{};
+  UnlockPhase m_StatusPhase{UnlockPhase::FINISHED};
+  const BaseUnlockConnection *m_StatusOwner{};
+  std::string m_StatusMessage{};
+  bool m_StatusDone{};
 };
 
 #endif // PAM_PCBIOUNLOCK_UNLOCKHANDLER_H
