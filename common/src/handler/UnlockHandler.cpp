@@ -210,7 +210,11 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, UDPUnloc
     }
     if(state != UnlockState::UNKNOWN)
       break;
+  #ifdef APPLE
+    if(phase != UnlockPhase::PHONE_UNLOCKING && Utils::GetCurrentTimeMs() - startTime > 30000) {
+  #else
     if(phase != UnlockPhase::PHONE_UNLOCKING && Utils::GetCurrentTimeMs() - startTime > CRYPT_PACKET_TIMEOUT) {
+  #endif
       state = UnlockState::TIMEOUT;
       break;
     }
