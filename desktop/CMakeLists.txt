@@ -56,6 +56,8 @@ if(WIN32)
 elseif(APPLE)
     add_compile_definitions(APPLE)
     set(PLATFORM_SRC
+            src/installer/EnvHelper.cpp
+            src/installer/EnvHelper.h
             src/installer/PAMHelper.cpp
             src/installer/PAMHelper.h
             src/installer/ServiceInstaller.Mac.cpp
@@ -73,6 +75,8 @@ elseif(APPLE)
 elseif(UNIX)
     add_compile_definitions(LINUX)
     set(PLATFORM_SRC
+            src/installer/EnvHelper.cpp
+            src/installer/EnvHelper.h
             src/installer/PAMHelper.cpp
             src/installer/PAMHelper.h
             src/installer/ServiceInstaller.Linux.cpp
@@ -119,9 +123,15 @@ set(UI_SRC_FILES
         src/ui/UpdaterWindow.h
         src/ui/UnlockTestWindow.cpp
         src/ui/UnlockTestWindow.h
+        src/ui/SshServersWindow.cpp
+        src/ui/SshServersWindow.h
 
         src/ui/models/DevicesTableModel.cpp
         src/ui/models/DevicesTableModel.h
+        src/ui/models/SshServersTableModel.cpp
+        src/ui/models/SshServersTableModel.h
+        src/ui/models/SshDeviceListModel.cpp
+        src/ui/models/SshDeviceListModel.h
         src/ui/models/UserListModel.cpp
         src/ui/models/UserListModel.h
         src/ui/models/NetworkListModel.cpp
@@ -144,7 +154,7 @@ qt_add_executable(pcbu_desktop
         ${PLATFORM_SRC}
 )
 qt_add_qml_module(pcbu_desktop
-        URI PCBioUnlock
+        URI PulseUnlock
         VERSION 1.0
         QML_FILES
         ${QML_FILES}
@@ -163,7 +173,8 @@ target_link_libraries(pcbu_desktop PRIVATE
 set_target_properties(pcbu_desktop PROPERTIES
         WIN32_EXECUTABLE TRUE
         MACOSX_BUNDLE TRUE
-        MACOSX_BUNDLE_GUI_IDENTIFIER com.meisapps.PCBioUnlock
+        MACOSX_BUNDLE_BUNDLE_NAME PulseUnlock
+        MACOSX_BUNDLE_GUI_IDENTIFIER com.meisapps.PulseUnlock
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/pkg/mac/Info.plist
 )
 install(TARGETS pcbu_desktop

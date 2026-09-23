@@ -1,6 +1,7 @@
 #include "TCPUnlockClient.h"
 
 #include "connection/SocketDefs.h"
+#include "connection/stream/SocketStream.h"
 #include "storage/AppSettings.h"
 
 #ifdef WINDOWS
@@ -23,6 +24,7 @@ bool TCPUnlockClient::Start() {
 
   WSA_STARTUP
   m_IsRunning = true;
+  SetPhase(UnlockPhase::CLIENT_CONNECTING);
   m_AcceptThread = std::thread(&TCPUnlockClient::ConnectThread, this);
   return true;
 }
@@ -31,11 +33,10 @@ void TCPUnlockClient::Stop() {
   if(!m_IsRunning)
     return;
 
-  if(m_ClientSocket != SOCKET_INVALID && m_HasConnection)
-    write(m_ClientSocket, "CLOSE", 5);
+  if(m_ClientSocket != SOCKET_INVALID && GetPhase() == UnlockPhase::PHONE_UNLOCKING)
+    SocketWrite(m_ClientSocket, "CLOSE", 5);
 
   m_IsRunning = false;
-  m_HasConnection = false;
   SOCKET_CLOSE(m_ClientSocket);
   if(m_AcceptThread.joinable())
     m_AcceptThread.join();
@@ -124,13 +125,14 @@ socketStart:
     goto threadEnd;
   }
 
-  m_HasConnection = true;
   spdlog::info("Connection established!");
   std::this_thread::sleep_for(std::chrono::milliseconds(250));
-  PerformAuthFlow(m_ClientSocket);
+  {
+    SocketStream stream(m_ClientSocket);
+    PerformAuthFlow(stream);
+  }
 
 threadEnd:
   m_IsRunning = false;
-  m_HasConnection = false;
   SOCKET_CLOSE(m_ClientSocket);
 }

@@ -1,6 +1,7 @@
 #include "BTUnlockClient.h"
 
 #include "connection/SocketDefs.h"
+#include "connection/stream/SocketStream.h"
 #include "platform/BluetoothHelper.h"
 #include "storage/AppSettings.h"
 using TimePoint = std::chrono::steady_clock::time_point;
@@ -77,6 +78,7 @@ bool BTUnlockClient::Start() {
   m_IsRunning = true;
   if(delayConnect)
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
+  SetPhase(UnlockPhase::CLIENT_CONNECTING);
   m_AcceptThread = std::thread(&BTUnlockClient::ConnectThread, this);
   return true;
 }
@@ -85,8 +87,8 @@ void BTUnlockClient::Stop() {
   if(!m_IsRunning)
     return;
 
-  if(m_ClientSocket != -1 && m_HasConnection)
-    write(m_ClientSocket, "CLOSE", 5);
+  if(m_ClientSocket != -1 && GetPhase() == UnlockPhase::PHONE_UNLOCKING)
+    SocketWrite(m_ClientSocket, "CLOSE", 5);
   
   if(m_UnlockState != UnlockState::SUCCESS && !successfullConnect) {
     if(credentialSwitch) {
@@ -106,12 +108,11 @@ void BTUnlockClient::Stop() {
       auto now = std::chrono::steady_clock::now();
       std::lock_guard<std::mutex> lock(globalTimeMutexLastLogTime);
       if(now - globalLastLogTime < std::chrono::milliseconds(1750) && !hasConnected)
-        std::this_thread::sleep_for(std::chrono::milliseconds(2250));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2750));
     }
   }
 
   m_IsRunning = false;
-  m_HasConnection = false;
   SOCKET_CLOSE(m_ClientSocket);
   if(m_AcceptThread.joinable())
     m_AcceptThread.join();
@@ -253,15 +254,16 @@ socketStart:
   } else {
     lastRememberedUsername = secondClientUsername;
   }
-  m_HasConnection = true;
   hasConnected = true;
   spdlog::info("Connection established!");
-  PerformAuthFlow(m_ClientSocket);
+  {
+    SocketStream stream(m_ClientSocket);
+    PerformAuthFlow(stream);
+  }
   if(m_UnlockState == UnlockState::SUCCESS)
     successfullConnect = true;
 
 threadEnd:
   m_IsRunning = false;
-  m_HasConnection = false;
   SOCKET_CLOSE(m_ClientSocket);
 }

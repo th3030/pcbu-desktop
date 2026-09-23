@@ -1,8 +1,8 @@
-# PC Bio Unlock for macOS - Installation Guide
+# PulseUnlock for macOS - Installation Guide
 
 > **⚠️ Warning (Preview Build)**
 >
-> PC Bio Unlock integrates with macOS authentication using PAM and Authorization Services. Incorrect configuration or uninstalling the application without restoring the original PAM and authorization settings can cause you to be locked out of your Mac. Before installing, ensure you know how to access macOS Recovery Mode. I am not responsible if you're locked out of your Mac!
+> PulseUnlock integrates with macOS authentication using PAM and Authorization Services. Incorrect configuration or uninstalling the application without restoring the original PAM and authorization settings can cause you to be locked out of your Mac. Before installing, ensure you know how to access macOS Recovery Mode. I am not responsible if you're locked out of your Mac!
 
 ## Requirements
 
@@ -14,7 +14,7 @@
 * A valid `/usr/local/sbin` directory
 * A valid `/usr/local/lib/pam` directory
 
-## Should I use PC Bio Unlock on Mac?
+## Should I use PulseUnlock on Mac?
 For most users, **Touch ID is the recommended authentication method on macOS.**
 
 ---
@@ -23,16 +23,16 @@ For most users, **Touch ID is the recommended authentication method on macOS.**
 
 ## 1. Install the application
 
-1. Open the downloaded **PCBioUnlock.dmg**.
-2. Drag **PCBioUnlock.app** into the **Applications** folder.
+1. Open the downloaded **PulseUnlock.dmg**.
+2. Drag **PulseUnlock.app** into the **Applications** folder.
 3. Eject the DMG.
 
 ---
 
 ## 2. Install OpenSSL Libraries
 
-PC Bio Unlock depends on the **OpenSSL libraries** (`libssl` and `libcrypto`).
-Without this you may get locked out if PC Bio Unlock has installed the modules.
+PulseUnlock depends on the **OpenSSL libraries** (`libssl` and `libcrypto`).
+Without this you may get locked out if PulseUnlock has installed the modules.
 
 ### Using Homebrew (Recommended)
 
@@ -55,7 +55,7 @@ After installation, Homebrew will install the required libraries in its default 
 
 ### 3.1 Enable Fast User Switching
 
-PC Bio Unlock uses the macOS login window authentication flow. To allow the lock screen to transition back to this authentication flow, **Fast User Switching must be enabled**.
+PulseUnlock uses the macOS login window authentication flow. To allow the lock screen to transition back to this authentication flow, **Fast User Switching must be enabled**.
 
 Enable Fast User Switching:
 
@@ -66,11 +66,11 @@ Enable Fast User Switching:
 
 Restart the Mac or log out and back in for the changes to apply.
 
-> **Important:** Without Fast User Switching enabled, the **Other Users** option may not appear on the lock screen. PC Bio Unlock may not be reachable from the macOS screensaver unlock flow.
+> **Important:** Without Fast User Switching enabled, the **Other Users** option may not appear on the lock screen. PulseUnlock may not be reachable from the macOS screensaver unlock flow.
 
 ### 3.2 Check required directories
 
-PC Bio Unlock requires a valid `/usr/local/sbin` directory for `pcbu_auth`.
+PulseUnlock requires a valid `/usr/local/sbin` directory for `pcbu_auth`.
 
 If `/usr/local/sbin` does not already exist on your system, create it before continuing:
 
@@ -78,7 +78,7 @@ If `/usr/local/sbin` does not already exist on your system, create it before con
 sudo mkdir -p /usr/local/sbin
 ```
 
-PC Bio Unlock also requires `/usr/local/lib/pam` to exist.
+PulseUnlock also requires `/usr/local/lib/pam` to exist.
 
 If `/usr/local/lib/pam` does not already exist on your system, create it before continuing:
 
@@ -86,7 +86,7 @@ If `/usr/local/lib/pam` does not already exist on your system, create it before 
 sudo mkdir -p /usr/local/lib/pam
 ```
 
-PC Bio Unlock can be easier invoked if you change the macOS authorization settings to route the lock screen through the login window via black dialog screen.
+PulseUnlock can be easier invoked if you change the macOS authorization settings to route the lock screen through the login window via black dialog screen.
 To enable this behavior, run:
 
 ```bash
@@ -97,22 +97,22 @@ This changes the screensaver unlock behavior so it uses the session owner authen
 
 ---
 
-## 4. Launch PC Bio Unlock
+## 4. Launch PulseUnlock
 
 > **Note:** When downloading unsigned builds, macOS may quarantine the application. If the application refuses to start, remove the quarantine attribute before launching:
 >
 > ```bash
-> sudo xattr -dr com.apple.quarantine /Applications/PCBioUnlock.app
+> sudo xattr -dr com.apple.quarantine /Applications/PulseUnlock.app
 > ```
 
 ---
 
-PC Bio Unlock requires elevated privileges.
+PulseUnlock requires elevated privileges.
 
 Open **Terminal** and execute:
 
 ```bash
-sudo /Applications/PCBioUnlock.app/Contents/MacOS/pcbu_desktop
+sudo /Applications/PulseUnlock.app/Contents/MacOS/pcbu_desktop
 ```
 
 Enter your administrator password when prompted.
@@ -129,7 +129,7 @@ After the application starts:
 
 ## 6. Enable integrations
 
-Open **Settings** inside PC Bio Unlock and enable:
+Open **Settings** inside PulseUnlock and enable:
 
 * ✅ Enable **Enable sudo Integration**
 * ✅ Enable **Enable macOS Integration**
@@ -142,13 +142,13 @@ These integrations configures the required PAM modules.
 
 After installation:
 
-* PC Bio Unlock should start successfully.
-* `sudo` authentication should invoke PC Bio Unlock.
+* PulseUnlock should start successfully.
+* `sudo` authentication should invoke PulseUnlock.
 * The macOS screensaver unlock should display a black authentication screen.
 * The **Other Users** button should be available.
 * Selecting **Other Users** should open the login window.
-* Pressing **Enter** in the login window should invoke PC Bio Unlock.
-* When you turn on the Mac and log in to a PC Bio Unlock enabled account. **ALWAYS** press Ctrl + Option when the loading bar is filled to a quarter to prevent the login screen from hanging forever
+* Pressing **Enter** in the login window should invoke PulseUnlock.
+* When you turn on the Mac and log in to a PulseUnlock enabled account. **ALWAYS** press Ctrl + Option when the loading bar is filled to a quarter to prevent the login screen from hanging forever
 
 ---
 
@@ -158,25 +158,25 @@ After installation:
 >
 > Do **not** simply delete the application.
 >
-> PC Bio Unlock modifies PAM configuration and macOS authorization settings. Removing the application without restoring the original PAM files and authorization database entries can leave macOS referencing missing PAM modules or altered authentication behavior, potentially preventing authentication.
+> PulseUnlock modifies PAM configuration and macOS authorization settings. Removing the application without restoring the original PAM files and authorization database entries can leave macOS referencing missing PAM modules or altered authentication behavior, potentially preventing authentication.
 
 ## Step 1
 
-Open the PC Bio Unlock app via:
+Open the PulseUnlock app via:
 
 ```bash
-sudo /Applications/PCBioUnlock.app/Contents/MacOS/pcbu_desktop
+sudo /Applications/PulseUnlock.app/Contents/MacOS/pcbu_desktop
 ```
 
 ## Step 2
-Enter the settings in PC Bio Unlock app and uncheck:
+Enter the settings in PulseUnlock app and uncheck:
 
 *  **Enable sudo Integration**
 *  **Enable macOS Integration**
 
 ## Step 3
 
-Verify that neither file references the PC Bio Unlock PAM module.
+Verify that neither file references the PulseUnlock PAM module.
 
 ## Step 4
 
@@ -198,7 +198,7 @@ Restart your Mac. Or logoff and login again to see the changes.
 
 ## Step 7 (Optional)
 
-If OpenSSL was installed only for PC Bio Unlock, it can be removed together with Homebrew.
+If OpenSSL was installed only for PulseUnlock, it can be removed together with Homebrew.
 
 > **Warning**
 >
@@ -273,14 +273,14 @@ In this situation:
 1. Boot into **macOS Recovery**.
 2. Open **Terminal**.
 3. Remount **Macintosh HD** so the system volume is writable and you can reset the PAM configuration files.
-4. Restore or edit the PAM configuration files to remove all PC Bio Unlock references.
+4. Restore or edit the PAM configuration files to remove all PulseUnlock references.
 5. Restart the Mac.
 
 ---
 
 # Known limitations
 
-* PC Bio Unlock requires administrator privileges to operate.
+* PulseUnlock requires administrator privileges to operate.
 * This preview version uses PAM integration and macOS authorization database changes.
 * Future versions may change the installation and authentication architecture.
 * The lock screen may stay black indefinity. You have to hard reset the Mac (holding the power button)

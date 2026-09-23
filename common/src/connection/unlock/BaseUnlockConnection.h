@@ -32,7 +32,8 @@ public:
 
   PairedDevice GetDevice();
   PacketUnlockResponseData GetResponseData();
-  [[nodiscard]] bool HasClient() const;
+  [[nodiscard]] UnlockPhase GetPhase() const;
+
   bool IsRunning();
   bool isOtherClient();
 
@@ -40,17 +41,18 @@ public:
   UnlockState PollResult();
 
 protected:
-  void PerformAuthFlow(SOCKET socket, bool needsDeviceID = false);
+  void SetPhase(UnlockPhase phase);
+  void PerformAuthFlow(ConnectionStream &stream, bool needsDeviceID = false);
 
 private:
-  void OnPacketReceived(SOCKET socket, Packet &packet);
-  bool SendUnlockRequest(SOCKET socket);
+  void OnPacketReceived(ConnectionStream &stream, Packet &packet);
+  bool SendUnlockRequest(ConnectionStream &stream);
   void OnResponseReceived(const Packet &packet);
 
 protected:
   std::atomic<bool> m_IsRunning{};
   std::thread m_AcceptThread{};
-  std::atomic<bool> m_HasConnection{};
+  std::atomic<UnlockPhase> m_Phase{UnlockPhase::STARTING};
   std::string m_UserName{};
   bool m_OtherClient{};
 
@@ -58,7 +60,7 @@ protected:
   PairedDevice m_PairedDevice{};
   PacketUnlockResponseData m_ResponseData{};
 
-  std::map<SOCKET, UnlockConnectionState> m_ConnectionStates{};
+  std::map<ConnectionStream *, UnlockConnectionState> m_ConnectionStates{};
   std::mutex m_StateMutex{};
 
   std::string m_AuthUser{};
