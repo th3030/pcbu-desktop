@@ -126,16 +126,14 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
   for(auto connection : connections) {
     threads.emplace_back([this, connection, numServers, isRunning, &currentResult, &completed, &cv, &mutex, udpBroadcaster, udpServer]() {
       auto serverResult = RunServer(connection, connection == udpServer ? udpBroadcaster : nullptr, &currentResult, isRunning);
-      if(serverResult.state == UnlockState::SUCCESS)
-        currentResult.store(serverResult);
+      currentResult.storeIfHigherPriority(serverResult);
       auto isLast = completed.fetch_add(1) + 1 == numServers;
       if(serverResult.state == UnlockState::SUCCESS)
         PrintStatus(UnlockStateUtils::ToString(serverResult.state));
       if(isLast) {
-        if(currentResult.load().state != UnlockState::SUCCESS) {
-          currentResult.store(serverResult);
-          PrintStatus(UnlockStateUtils::ToString(serverResult.state));
-        }
+        auto finalState = currentResult.load().state;
+        if(finalState != UnlockState::SUCCESS)
+          PrintStatus(UnlockStateUtils::ToString(finalState));
         std::lock_guard l(mutex);
         cv.notify_one();
       }
