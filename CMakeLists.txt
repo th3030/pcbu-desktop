@@ -1,9 +1,12 @@
 cmake_minimum_required(VERSION 3.22)
-project(pcbu_desktop_all)
+project(pcbu_desktop_all VERSION 4.1.0)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(DetectArchitecture)
 include(FetchContent)
+include(VersionResource)
+
+file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/version.txt" CONTENT "${PROJECT_VERSION}")
 
 if(NOT DEFINED TARGET_ARCH)
     detect_architecture(TARGET_ARCH)
@@ -13,20 +16,23 @@ if(WIN32)
     set(TARGET_OS "win")
 elseif(APPLE)
     set(TARGET_OS "mac")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0")
 elseif(UNIX)
     set(TARGET_OS "linux")
 else()
     message(FATAL_ERROR "Unsupported OS.")
 endif()
 
-if(WIN32)
+if(WIN32 OR (APPLE AND DEFINED ENV{VCPKG_ROOT}))
     if(NOT EXISTS "$ENV{VCPKG_ROOT}")
         message(FATAL_ERROR "VCPKG_ROOT does not exist.")
     endif()
     file(TO_CMAKE_PATH $ENV{VCPKG_ROOT} VCPKG_ROOT)
     message(STATUS "VCPKG_ROOT set to ${VCPKG_ROOT}")
 
-    if(MSVC_STATIC_LINK)
+    if(APPLE)
+        set(PCBU_VCPKG_TRIPLET "${TARGET_ARCH}-osx-static")
+    elseif(MSVC_STATIC_LINK)
         set(PCBU_VCPKG_TRIPLET "${TARGET_ARCH}-windows-static")
     else()
         set(PCBU_VCPKG_TRIPLET "${TARGET_ARCH}-windows-static-md")
@@ -45,13 +51,15 @@ if(WIN32)
     endif()
 
     include("${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake")
+    set(OPENSSL_USE_STATIC_LIBS TRUE)
+endif()
 
+if(WIN32)
     if(MSVC_STATIC_LINK)
         set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         set(OPENSSL_MSVC_STATIC_RT TRUE)
         set(BOOST_RUNTIME_LINK static)
     endif()
-    set(OPENSSL_USE_STATIC_LIBS TRUE)
     add_compile_definitions(_WIN32_WINNT=0x0A00)
     if(MSVC)
         add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/bigobj>)
@@ -72,7 +80,7 @@ FetchContent_Declare(
 )
 FetchContent_Declare(
         Boost
-        URL https://github.com/boostorg/boost/releases/download/boost-1.91.0-1/boost-1.91.0-1-cmake.7z
+        URL https://github.com/boostorg/boost/releases/download/boost-1.92.0/boost-1.92.0-cmake.7z
         DOWNLOAD_EXTRACT_TIMESTAMP ON
 )
 
@@ -80,7 +88,7 @@ message("-- Fetching json...")
 FetchContent_MakeAvailable(json)
 
 message("-- Fetching boost...")
-set(BOOST_INCLUDE_LIBRARIES asio beast filesystem process system url CACHE STRING "" FORCE)
+set(BOOST_INCLUDE_LIBRARIES asio beast dll filesystem process system url CACHE STRING "" FORCE)
 set(Boost_USE_STATIC_LIBS ON CACHE BOOL "")
 FetchContent_MakeAvailable(Boost)
 set_property(TARGET boost_process PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -91,6 +99,8 @@ FetchContent_MakeAvailable(spdlog)
 
 add_subdirectory(common)
 add_subdirectory(desktop)
+add_subdirectory(desktop/elevator)
+add_dependencies(pcbu_desktop pcbu_elevator)
 if(WIN32)
     add_subdirectory(natives/win_pulseunlock)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
