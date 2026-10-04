@@ -27,33 +27,9 @@ For most users, **Touch ID is the recommended authentication method on macOS.**
 2. Drag **PulseUnlock.app** into the **Applications** folder.
 3. Eject the DMG.
 
----
+## 2. Prepare the system
 
-## 2. Install OpenSSL Libraries
-
-PulseUnlock depends on the **OpenSSL libraries** (`libssl` and `libcrypto`).
-Without this you may get locked out if PulseUnlock has installed the modules.
-
-### Using Homebrew (Recommended)
-
-If Homebrew is not installed, install it first.
-Open the terminal and enter this command:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-Install the OpenSSL libraries:
-
-```bash
-brew install openssl
-```
-
-After installation, Homebrew will install the required libraries in its default location. No additional configuration is normally required.
-
-## 3. Prepare the system
-
-### 3.1 Enable Fast User Switching
+### 2.1 Enable Fast User Switching
 
 PulseUnlock uses the macOS login window authentication flow. To allow the lock screen to transition back to this authentication flow, **Fast User Switching must be enabled**.
 
@@ -68,7 +44,7 @@ Restart the Mac or log out and back in for the changes to apply.
 
 > **Important:** Without Fast User Switching enabled, the **Other Users** option may not appear on the lock screen. PulseUnlock may not be reachable from the macOS screensaver unlock flow.
 
-### 3.2 Check required directories
+### 2.2 Check required directories
 
 PulseUnlock requires a valid `/usr/local/sbin` directory for `pcbu_auth`.
 
@@ -97,7 +73,7 @@ This changes the screensaver unlock behavior so it uses the session owner authen
 
 ---
 
-## 4. Launch PulseUnlock
+## 3. Launch PulseUnlock
 
 > **Note:** When downloading unsigned builds, macOS may quarantine the application. If the application refuses to start, remove the quarantine attribute before launching:
 >
@@ -107,17 +83,10 @@ This changes the screensaver unlock behavior so it uses the session owner authen
 
 ---
 
-PulseUnlock requires elevated privileges.
+Opening the application via the Application window will always prompt if a script wants to make changes. This is expected behavior due to this version not being signed.
+You can safely enter your password to allow the app to write to it's logs and installing the PAM modules.
 
-Open **Terminal** and execute:
-
-```bash
-sudo /Applications/PulseUnlock.app/Contents/MacOS/pcbu_desktop
-```
-
-Enter your administrator password when prompted.
-
-## 5. Install the authentication modules
+## 4. Install the authentication modules
 
 After the application starts:
 
@@ -127,7 +96,7 @@ After the application starts:
 
 ---
 
-## 6. Enable integrations
+## 5. Enable integrations
 
 Open **Settings** inside PulseUnlock and enable:
 
@@ -162,11 +131,7 @@ After installation:
 
 ## Step 1
 
-Open the PulseUnlock app via:
-
-```bash
-sudo /Applications/PulseUnlock.app/Contents/MacOS/pcbu_desktop
-```
+Open the PulseUnlock app
 
 ## Step 2
 Enter the settings in PulseUnlock app and uncheck:
@@ -196,6 +161,7 @@ Delete the application by bringing it to the Trash and emptying the Trash
 
 Restart your Mac. Or logoff and login again to see the changes.
 
+# The steps below are deprecated and only exists for older install methods
 ## Step 7 (Optional)
 
 If OpenSSL was installed only for PulseUnlock, it can be removed together with Homebrew.
