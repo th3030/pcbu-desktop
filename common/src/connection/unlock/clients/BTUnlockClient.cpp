@@ -79,13 +79,20 @@ bool BTUnlockClient::Start() {
   if(delayConnect)
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
   SetPhase(UnlockPhase::CLIENT_CONNECTING);
-  m_AcceptThread = std::thread(&BTUnlockClient::ConnectThread, this);
+  m_AcceptThread = std::thread([this]() {
+    try {
+      ConnectThread();
+    } catch(const std::exception &ex) {
+      spdlog::error("BT client failed: {}", ex.what());
+      m_UnlockState = UnlockState::UNK_ERROR;
+      m_IsRunning = false;
+      SOCKET_CLOSE(m_ClientSocket);
+    }
+  });
   return true;
 }
 
 void BTUnlockClient::Stop() {
-  if(!m_IsRunning)
-    return;
 
   if(m_ClientSocket != -1 && GetPhase() == UnlockPhase::PHONE_UNLOCKING)
     SocketWrite(m_ClientSocket, "CLOSE", 5);
@@ -113,7 +120,6 @@ void BTUnlockClient::Stop() {
   }
 
   m_IsRunning = false;
-  SOCKET_CLOSE(m_ClientSocket);
   if(m_AcceptThread.joinable())
     m_AcceptThread.join();
 }
@@ -166,8 +172,7 @@ socketStart:
     return;
   }
 
-  fd_set fdSet{};
-  FD_SET(m_ClientSocket, &fdSet);
+
   struct timeval connectTimeout{};
   int error = 0;
   socklen_t errorLen = sizeof(error);
@@ -194,13 +199,15 @@ socketStart:
       goto threadEnd;
     }
   }
+
   if(credentialSwitch) {
     std::this_thread::sleep_for(std::chrono::milliseconds(3125));
     credentialSwitch = false;
   }
-  if(select((int)m_ClientSocket + 1, nullptr, &fdSet, nullptr, &connectTimeout) <= 0) {
-    if(numRetries <= 5 && m_IsRunning) {
-      spdlog::error("select() timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
+  if(WaitForConnection(m_ClientSocket, settings.clientConnectTimeout, m_IsRunning) <= 0) {
+    if(m_IsRunning)
+      spdlog::error("Connect timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
+    if(numRetries < settings.clientConnectRetries && m_IsRunning) {
       SOCKET_CLOSE(m_ClientSocket);
       m_UnlockState = UnlockState::CONNECT_ERROR;
       numRetries++;
@@ -257,11 +264,13 @@ socketStart:
   hasConnected = true;
   spdlog::info("Connection established!");
   {
-    SocketStream stream(m_ClientSocket);
+    SocketStream stream(m_ClientSocket, &m_IsRunning, settings.clientSocketTimeout);
     PerformAuthFlow(stream);
   }
   if(m_UnlockState == UnlockState::SUCCESS)
     successfullConnect = true;
+  if(!m_IsRunning && m_Phase == UnlockPhase::PHONE_UNLOCKING)
+    SocketWrite(m_ClientSocket, "CLOSE", 5);
 
 threadEnd:
   m_IsRunning = false;

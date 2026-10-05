@@ -33,29 +33,7 @@ public:
     std::lock_guard<std::mutex> lock(m_Mutex);
     m_Data = data;
   }
-
-  void storeIfHigherPriority(const UnlockResult &data) {
-    std::lock_guard<std::mutex> lock(m_Mutex);
-    if(GetPriority(data.state) >= GetPriority(m_Data.state))
-      m_Data = data;
-  }
-
 private:
-  static int GetPriority(UnlockState state) {
-    switch(state) {
-      case UnlockState::SUCCESS:
-        return 3;
-      case UnlockState::UNKNOWN:
-      case UnlockState::CANCELED:
-        return 0;
-      case UnlockState::CONNECT_ERROR:
-      case UnlockState::TIMEOUT:
-        return 1;
-      default:
-        return 2;
-    }
-  }
-
   UnlockResult m_Data{};
   mutable std::mutex m_Mutex{};
 };
