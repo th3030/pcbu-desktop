@@ -10,6 +10,11 @@
 #ifndef WINDOWS
 #include <cstdlib>
 #endif
+#ifdef APPLE
+#include <cerrno>
+#include <sys/event.h>
+#include <unistd.h>
+#endif
 
 #include "platform/PlatformHelper.h"
 #include "shell/ElevatorCommands.h"
@@ -121,9 +126,37 @@ int ElevatorApp::RunMain(int argc, char *argv[]) {
     return 1;
   }
 
+#ifdef APPLE
+  // The elevator runs detached from osascript, so also stop when the desktop process exits,
+  // even if its IPC socket is kept open by another process.
+  int procQueue = kqueue();
+  struct kevent procWatch{};
+  EV_SET(&procWatch, expectedPid, EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, nullptr);
+  if(procQueue == -1 || kevent(procQueue, &procWatch, 1, nullptr, 0, nullptr) == -1) {
+    spdlog::error("Failed watching desktop process. (Code={})", errno);
+    if(procQueue != -1)
+      close(procQueue);
+    return 1;
+  }
+  auto desktopExited = false;
+  auto isDesktopRunning = [procQueue, &desktopExited]() {
+    if(!desktopExited) {
+      struct kevent event{};
+      struct timespec noWait{};
+      desktopExited = kevent(procQueue, nullptr, 0, &event, 1, &noWait) == 1;
+      if(desktopExited)
+        spdlog::info("[Elevator] Desktop process exited.");
+    }
+    return !desktopExited;
+  };
+#else
+  auto isDesktopRunning = []() { return true; };
+#endif
+  spdlog::info("[Elevator] Connected to desktop. (Pid={})", expectedPid);
+
   while(true) {
     spdlog::debug("[Elevator] Reading command...");
-    auto msg = ipc.ReadMessage([]() { return true; }, IPCHelper::NO_TIMEOUT);
+    auto msg = ipc.ReadMessage(isDesktopRunning, IPCHelper::NO_TIMEOUT);
     if(!msg.has_value()) {
       spdlog::info("[Elevator] IPC connection closed.");
       break;
@@ -140,6 +173,9 @@ int ElevatorApp::RunMain(int argc, char *argv[]) {
       spdlog::error("[Elevator] Command failed. ({}, {})", cmd.value().ToString(), resp.ToString());
     SendResponse(ipc, resp);
   }
+#ifdef APPLE
+  close(procQueue);
+#endif
   return 0;
 }
 

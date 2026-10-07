@@ -16,9 +16,13 @@
 #include <boost/process/v2/windows/creation_flags.hpp>
 
 constexpr boost::process::v2::windows::process_creation_flags<CREATE_NO_WINDOW> create_no_window;
+#elif APPLE
+#include <cerrno>
+#include <signal.h>
 #endif
 
 constexpr uint32_t ACCEPT_TIMEOUT_MS = 300000;
+constexpr uint32_t LAUNCH_GRACE_MS = 30000;
 constexpr uint32_t COMMAND_TIMEOUT_MS = 30000;
 constexpr uint32_t RESPONSE_TIMEOUT_MS = 600000;
 constexpr uint32_t SHUTDOWN_WAIT_MS = 1000;
@@ -46,7 +50,10 @@ ElevatorService::ElevatorService() : m_Ctx() {
     m_Process = boost::process::process(ex, boost::process::v2::environment::find_executable("pkexec"), {procPath.string(), ipcName.value(), pidStr});
 #elif APPLE
     auto asEscape = [](const std::string &s) { return StringUtils::Replace(StringUtils::Replace(s, "\\", "\\\\"), "\"", "\\\""); };
-    auto procCmd = fmt::format("{} {} {}", StringUtils::ShellQuote(procPath.string()), StringUtils::ShellQuote(ipcName.value()), pidStr);
+    // Detach the elevator so osascript and its admin authorization finish right away.
+    // A long-running "do shell script ... with administrator privileges" freezes later authorization prompts.
+    auto procCmd = fmt::format("{} {} {} </dev/null >/dev/null 2>&1 &", StringUtils::ShellQuote(procPath.string()),
+                               StringUtils::ShellQuote(ipcName.value()), pidStr);
     m_Process = boost::process::process(ex, "/usr/bin/osascript",
                                         {"-e", fmt::format("do shell script \"{}\" with prompt \"{}\" with administrator privileges",
                                                            asEscape(procCmd), asEscape(I18n::Get("elevator_prompt", I18n::Get("product_name"))))});
@@ -54,11 +61,14 @@ ElevatorService::ElevatorService() : m_Ctx() {
 
     if(!m_Ipc.Accept(ACCEPT_TIMEOUT_MS, [this]() { return IsProcessRunning(); }))
       throw std::runtime_error("Timed out waiting for elevator IPC.");
+#ifdef APPLE
+    m_ElevatorPid = m_Ipc.GetPeerPid();
+#endif
     spdlog::info("[ElevatorService] Elevator started.");
   } catch(const std::exception &ex) {
     spdlog::error("[ElevatorService] Failed to start elevator process. (Exception={})", ex.what());
     m_Ipc.Close();
-    if(IsProcessRunning()) {
+    if(IsLauncherRunning()) {
       boost::system::error_code ec{};
       m_Process.value().terminate(ec);
     }
@@ -77,14 +87,45 @@ ElevatorService::~ElevatorService() {
   auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(SHUTDOWN_WAIT_MS);
   while(IsProcessRunning() && std::chrono::steady_clock::now() < deadline)
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
-  if(IsProcessRunning())
+  if(IsLauncherRunning())
     m_Process.value().terminate(ec);
   spdlog::info("[ElevatorService] Elevator stopped.");
 }
 
-bool ElevatorService::IsProcessRunning() {
+bool ElevatorService::IsLauncherRunning() {
   boost::system::error_code ec{};
+#ifdef APPLE
+  // Once osascript has exited it is reaped; its PID may already belong to another process
+  if(m_LauncherExited)
+    return false;
+#endif
   return m_Process.has_value() && m_Process.value().running(ec);
+}
+
+bool ElevatorService::IsProcessRunning() {
+#ifdef APPLE
+  if(m_ElevatorPid.has_value())
+    return kill(static_cast<pid_t>(m_ElevatorPid.value()), 0) == 0 || errno == EPERM;
+  if(!m_LauncherExited) {
+    if(!m_Process.has_value())
+      return false;
+    boost::system::error_code ec{};
+    if(m_Process.value().running(ec))
+      return true;
+    // Query the exit code only once: later running() calls fail with ECHILD
+    m_LauncherExited = true;
+    auto exitCode = ec ? -1 : m_Process.value().exit_code();
+    if(exitCode != 0) {
+      spdlog::error("[ElevatorService] Elevator launch failed or was cancelled. (Code={})", exitCode);
+      return false;
+    }
+    spdlog::info("[ElevatorService] Elevator launched, waiting for it to connect...");
+    m_LaunchedAt = std::chrono::steady_clock::now();
+  }
+  return m_LaunchedAt.has_value() && std::chrono::steady_clock::now() - m_LaunchedAt.value() < std::chrono::milliseconds(LAUNCH_GRACE_MS);
+#else
+  return IsLauncherRunning();
+#endif
 }
 
 bool ElevatorService::IsRunning() {
