@@ -28,6 +28,32 @@ std::string BTUnlockClient::lastRememberedUsername = "";
 std::string BTUnlockClient::secondClientUsername = "";
 std::chrono::steady_clock::time_point globalLastLogTime = std::chrono::steady_clock::now();
 
+#ifdef WINDOWS
+static int WaitForBTConnection(SOCKET socket, uint32_t timeoutSecs, const std::atomic<bool> &isRunning) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSecs);
+  while(isRunning) {
+    fd_set writeSet{};
+    FD_ZERO(&writeSet);
+    FD_SET(socket, &writeSet);
+    struct timeval slice{};
+    slice.tv_usec = 100 * 1000;
+    auto result = select(0, nullptr, &writeSet, nullptr, &slice);
+    if(result != 0 || std::chrono::steady_clock::now() >= deadline)
+      return result;
+  }
+  return 0;
+}
+#endif
+
+// The RFCOMM channel is held by the other client; expected while waiting, so not logged
+static bool IsChannelBusy(int error) {
+#ifdef WINDOWS
+  return error == WSAEADDRINUSE;
+#else
+  return false;
+#endif
+}
+
 BTUnlockClient::BTUnlockClient(const std::string &deviceAddress, const PairedDevice &device, const bool &otherClient) : BaseUnlockConnection(device) {
   m_DeviceAddress = deviceAddress;
   m_Channel = -1;
@@ -172,10 +198,11 @@ socketStart:
     return;
   }
 
-
   struct timeval connectTimeout{};
   int error = 0;
   socklen_t errorLen = sizeof(error);
+  int waitResult{};
+  bool canRetry{};
   connectTimeout.tv_sec = 6;
 
   if(!SetSocketRWTimeout(m_ClientSocket, settings.clientSocketTimeout)) {
@@ -194,26 +221,41 @@ socketStart:
   if(connect(m_ClientSocket, reinterpret_cast<struct sockaddr *>(&address), sizeof(address)) < 0) {
     auto error = SOCKET_LAST_ERROR;
     if(error != SOCKET_ERROR_IN_PROGRESS && error != SOCKET_ERROR_WOULD_BLOCK) {
-      spdlog::error("connect() failed. (Code={})", error);
+      if(!IsChannelBusy(error))
+        spdlog::error("connect() failed. (Code={})", error);
+      else
+        spdlog::info("Bluetooth channel busy, giving up.");
       m_UnlockState = UnlockState::CONNECT_ERROR;
       goto threadEnd;
     }
   }
-
   if(credentialSwitch) {
     std::this_thread::sleep_for(std::chrono::milliseconds(3125));
     credentialSwitch = false;
   }
-  if(WaitForConnection(m_ClientSocket, settings.clientConnectTimeout, m_IsRunning) <= 0) {
-    if(m_IsRunning)
-      spdlog::error("Connect timed out or failed. (Code={}, Retry={})", SOCKET_LAST_ERROR, numRetries);
-    if(numRetries < settings.clientConnectRetries && m_IsRunning) {
+#ifdef WINDOWS
+  waitResult = WaitForBTConnection(m_ClientSocket, static_cast<uint32_t>(connectTimeout.tv_sec), m_IsRunning);
+  canRetry = numRetries <= 5;
+#else
+  waitResult = WaitForConnection(m_ClientSocket, settings.clientConnectTimeout, m_IsRunning);
+  canRetry = numRetries < settings.clientConnectRetries;
+#endif
+  if(waitResult <= 0) {
+    auto waitError = SOCKET_LAST_ERROR;
+    // A failed connect() is not visible in the write set; read the socket's own error to tell "busy" from real errors
+    error = 0;
+    getsockopt(m_ClientSocket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&error), &errorLen);
+    if(m_IsRunning && !IsChannelBusy(error))
+      spdlog::error("Connect timed out or failed. (Code={}, Retry={})", error != 0 ? error : waitError, numRetries);
+    if(canRetry && m_IsRunning) {
       SOCKET_CLOSE(m_ClientSocket);
       m_UnlockState = UnlockState::CONNECT_ERROR;
       numRetries++;
       goto socketStart;
     }
 
+    if(m_IsRunning && IsChannelBusy(error))
+      spdlog::info("Bluetooth channel busy, giving up.");
     m_UnlockState = UnlockState::CONNECT_ERROR;
     goto threadEnd;
   }
@@ -224,13 +266,16 @@ socketStart:
     goto threadEnd;
   }
   if (error != 0) {
-    spdlog::error("getsockopt(SO_ERROR) returned an error. (Code={}, Retry={})", error, numRetries);
+    if(!IsChannelBusy(error))
+      spdlog::error("getsockopt(SO_ERROR) returned an error. (Code={}, Retry={})", error, numRetries);
     if(numRetries < settings.clientConnectRetries && m_IsRunning) {
       SOCKET_CLOSE(m_ClientSocket);
       m_UnlockState = UnlockState::CONNECT_ERROR;
       numRetries++;
       goto socketStart;
     }
+    if(IsChannelBusy(error))
+      spdlog::info("Bluetooth channel busy, giving up.");
     m_UnlockState = UnlockState::CONNECT_ERROR;
     goto threadEnd;
   }
