@@ -55,7 +55,10 @@ if(WIN32)
     endif()
 elseif(APPLE)
     add_compile_definitions(APPLE)
+    enable_language(OBJCXX)
     set(PLATFORM_SRC
+            src/installer/BTHelperService.Mac.mm
+            src/installer/BTHelperService.Mac.h
             src/installer/EnvHelper.cpp
             src/installer/EnvHelper.h
             src/installer/PAMHelper.cpp
@@ -199,6 +202,24 @@ add_custom_command(TARGET pcbu_desktop POST_BUILD
     COMMENT "Copying elevator..."
 )
 set_property(TARGET pcbu_desktop APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:pcbu_elevator>)
+
+if(APPLE)
+    target_link_libraries(pcbu_desktop PRIVATE "-framework ServiceManagement")
+    target_compile_options(pcbu_desktop PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+    # SMAppService expects the agent plist at Contents/Library/LaunchAgents/ and runs the helper from Contents/MacOS/
+    add_custom_command(TARGET pcbu_desktop POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+                $<TARGET_FILE:pcbu_bthelper>
+                $<TARGET_FILE_DIR:pcbu_desktop>
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+                $<TARGET_BUNDLE_CONTENT_DIR:pcbu_desktop>/Library/LaunchAgents
+        COMMAND ${CMAKE_COMMAND} -E copy
+                ${CMAKE_SOURCE_DIR}/pkg/mac/com.meisapps.PulseUnlock.bthelper.plist
+                $<TARGET_BUNDLE_CONTENT_DIR:pcbu_desktop>/Library/LaunchAgents/
+        COMMENT "Copying Bluetooth helper..."
+    )
+    set_property(TARGET pcbu_desktop APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:pcbu_bthelper>)
+endif()
 
 set_target_properties(pcbu_desktop PROPERTIES
         WIN32_EXECUTABLE TRUE

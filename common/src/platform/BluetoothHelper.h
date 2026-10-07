@@ -46,13 +46,13 @@ public:
 #endif
 #endif
 
+#ifdef APPLE
+  // Accepts "AA:BB:CC:DD:EE:FF" and "aa-bb-cc-dd-ee-ff". Bytes are in display order, as in BluetoothDeviceAddress.
+  static bool ParseAddress(const std::string &address, uint8_t (&bytes)[6]);
+#endif
+
 private:
   BluetoothHelper() = default;
-
-#ifdef APPLE
-  static void *g_InquiryDelegate;
-  static void *g_DeviceInquiry;
-#endif
 };
 
 #endif // PCBU_DESKTOP_BLUETOOTHHELPER_H

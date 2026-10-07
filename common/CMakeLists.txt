@@ -42,13 +42,20 @@ elseif(APPLE)
             "-framework Carbon"
             "-framework IOKit"
             "-framework IOBluetooth"
+            "-framework CoreBluetooth"
             "-framework Security"
     )
     set(PLATFORM_SRC
+            src/connection/BluetoothRelay.Mac.cpp
+            src/connection/BluetoothRelay.Mac.h
+            src/connection/stream/RFCOMMStream.Mac.mm
+            src/connection/stream/RFCOMMStream.Mac.h
             src/connection/unlock/clients/BTUnlockClient.Mac.mm
             src/connection/unlock/servers/BTUnlockServer.Mac.mm
             src/platform/PlatformHelper.Mac.cpp
             src/platform/BluetoothHelper.Mac.mm
+            src/platform/BluetoothRunLoop.Mac.mm
+            src/platform/BluetoothRunLoop.Mac.h
     )
 elseif(UNIX)
     find_package(PkgConfig REQUIRED)
@@ -161,6 +168,9 @@ target_link_libraries(pcbu_common PUBLIC
         Boost::url
         ${PLATFORM_LIBS}
 )
+if(APPLE)
+    target_compile_options(pcbu_common PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+endif()
 
 # Commit header
 set(COMMIT_HEADER_FILE "${CMAKE_CURRENT_SOURCE_DIR}/src/generated/commit.h")

@@ -73,8 +73,12 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
         connection = new TCPUnlockClient(device.ipAddress, device.tcpPort, device);
         break;
       case PairingMethod::BLUETOOTH:
+#ifdef WINDOWS
         connection = new BTUnlockClient(device.bluetoothAddress, device, false);
         btConnection = new BTUnlockClient(device.bluetoothAddress, device, true);
+#else
+        connection = new BTUnlockClient(device.bluetoothAddress, device, false);
+#endif
         break;
       case PairingMethod::MANUAL_UDP:
       case PairingMethod::UDP: {

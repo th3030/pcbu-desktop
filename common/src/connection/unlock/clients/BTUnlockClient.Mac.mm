@@ -1,71 +1,16 @@
 #include "BTUnlockClient.h"
 
-#import <Foundation/Foundation.h>
-#import <IOBluetooth/IOBluetooth.h>
+#include <unistd.h>
 
-@interface BTUnlockClientWrapper : NSObject <IOBluetoothRFCOMMChannelDelegate>
-@property(nonatomic, strong) IOBluetoothDevice *device;
-@property(nonatomic, strong) IOBluetoothRFCOMMChannel *socket;
+#include "connection/BluetoothRelay.Mac.h"
+#include "connection/SocketDefs.h"
+#include "connection/stream/RFCOMMStream.Mac.h"
+#include "connection/stream/SocketStream.h"
+#include "storage/AppSettings.h"
 
-- (id)initWithAddress:(NSString *)deviceAddress;
-
-- (void)start;
-- (void)stop;
-@end
-
-@implementation BTUnlockClientWrapper
-- (id)initWithAddress:(NSString *)deviceAddress {
-  self.device = [IOBluetoothDevice deviceWithAddressString:deviceAddress];
-  return self;
-}
-
-- (void)start {
-  [self.device performSDPQuery:self];
-}
-
-- (void)stop {
-  [self.socket closeChannel];
-}
-
-- (void)sdpQueryComplete:(IOBluetoothDevice *)device status:(IOReturn)status {
-  if(status != kIOReturnSuccess) {
-    spdlog::error("SDP query failed. (Code={})", status);
-    return;
-  }
-  static uint8_t CHANNEL_UUID[16] = {0x62, 0x18, 0x2b, 0xf7, 0x97, 0xc8, 0x45, 0xf9, 0xaa, 0x2c, 0x53, 0xc5, 0xf2, 0x00, 0x8b, 0xdf};
-  auto svcUUID = [IOBluetoothSDPUUID uuidWithBytes:CHANNEL_UUID length:16];
-  auto svcRecord = [device getServiceRecordForUUID:svcUUID];
-  if(!svcRecord) {
-    spdlog::error("SDP getServiceRecordForUUID failed.");
-    return;
-  }
-  BluetoothRFCOMMChannelID channelID{};
-  if((status = [svcRecord getRFCOMMChannelID:&channelID]) != kIOReturnSuccess) {
-    spdlog::error("SDP getRFCOMMChannelID failed. (Code={})", status);
-    return;
-  }
-  if((status = [device openRFCOMMChannelSync:&_socket withChannelID:channelID delegate:self]) != kIOReturnSuccess) {
-    spdlog::error("Bluetooth connect failed. (Code={})", status);
-    return;
-  }
-}
-
-- (void)rfcommChannelData:(IOBluetoothRFCOMMChannel *)rfcommChannel data:(void *)dataPointer length:(size_t)dataLength {
-  NSData *data = [NSData dataWithBytes:dataPointer length:dataLength];
-  NSString *receivedString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-  NSLog(@"Received data: %@", receivedString);
-}
-
-- (void)rfcommChannelClosed:(IOBluetoothRFCOMMChannel *)rfcommChannel {
-  NSLog(@"RFCOMM Channel closed.");
-  self.socket = nil;
-}
-@end
-
-BTUnlockClient::BTUnlockClient(const std::string& deviceAddress, const PairedDevice& device, const int &otherClient) : BaseUnlockConnection(device) {
-    #warning WIP // ToDo
-    m_Wrapper = [[BTUnlockClientWrapper alloc] initWithAddress:[NSString stringWithCString:deviceAddress.c_str() encoding:NSUTF8StringEncoding]];
-    //[self.socket writeSync:(void *)data.bytes length:data.length];
+BTUnlockClient::BTUnlockClient(const std::string &deviceAddress, const PairedDevice &device, const bool &otherClient) : BaseUnlockConnection(device) {
+  m_DeviceAddress = deviceAddress;
+  m_IsRunning = false;
 }
 
 bool BTUnlockClient::Start() {
@@ -74,14 +19,80 @@ bool BTUnlockClient::Start() {
 
   m_IsRunning = true;
   SetPhase(UnlockPhase::CLIENT_CONNECTING);
-  [(BTUnlockClientWrapper *)m_Wrapper start];
+  m_AcceptThread = std::thread([this]() {
+    try {
+      ConnectThread();
+    } catch(const std::exception &ex) {
+      spdlog::error("BT client failed: {}", ex.what());
+      m_UnlockState = UnlockState::UNK_ERROR;
+      m_IsRunning = false;
+      CloseStream();
+    }
+  });
   return true;
 }
 
 void BTUnlockClient::Stop() {
-  if(!m_IsRunning)
+  m_IsRunning = false;
+  if(m_AcceptThread.joinable())
+    m_AcceptThread.join();
+}
+
+int BTUnlockClient::OpenStream(uint32_t connectTimeoutSecs, uint32_t socketTimeoutSecs) {
+  // pcbu_auth runs as root outside the user's session, where IOBluetooth does not work, so go through the helper
+  if(geteuid() == 0) {
+    int status{};
+    m_RelaySocket = BluetoothRelay::Connect(m_AuthUser, m_DeviceAddress, connectTimeoutSecs, &m_IsRunning, status);
+    if(m_RelaySocket == SOCKET_INVALID)
+      return status;
+    m_Stream = std::make_unique<SocketStream>(m_RelaySocket, &m_IsRunning, socketTimeoutSecs);
+    return 0;
+  }
+
+  auto stream = std::make_unique<RFCOMMStream>(m_DeviceAddress, &m_IsRunning, socketTimeoutSecs);
+  auto status = stream->Connect(BluetoothRelay::SERVICE_UUID, connectTimeoutSecs);
+  if(status == 0)
+    m_Stream = std::move(stream);
+  return status;
+}
+
+void BTUnlockClient::CloseStream() {
+  if(m_Stream)
+    m_Stream->Close();
+  m_Stream.reset();
+  m_RelaySocket = SOCKET_INVALID;
+}
+
+void BTUnlockClient::ConnectThread() {
+  uint32_t numRetries{};
+  auto settings = AppSettings::Get();
+  spdlog::info("Connecting via BT...");
+
+  while(true) {
+    auto status = OpenStream(settings.clientConnectTimeout, settings.clientSocketTimeout);
+    if(status == 0)
+      break;
+    if(m_IsRunning)
+      spdlog::error("Connect timed out or failed. (Code={:#x}, Retry={})", static_cast<uint32_t>(status), numRetries);
+    CloseStream();
+    if(numRetries < settings.clientConnectRetries && m_IsRunning) {
+      numRetries++;
+      continue;
+    }
+    m_UnlockState = UnlockState::CONNECT_ERROR;
+    m_IsRunning = false;
     return;
+  }
+
+  PerformAuthFlow(*m_Stream);
+  if(!m_IsRunning && m_Phase == UnlockPhase::PHONE_UNLOCKING) {
+    // SocketStream refuses writes once stopped, so write to the relay socket directly
+    if(m_RelaySocket != SOCKET_INVALID)
+      SocketWrite(m_RelaySocket, "CLOSE", 5);
+    else
+      m_Stream->WriteRaw(reinterpret_cast<const uint8_t *>("CLOSE"), 5);
+  }
 
   m_IsRunning = false;
-  [(BTUnlockClientWrapper *)m_Wrapper stop];
+  CloseStream();
 }

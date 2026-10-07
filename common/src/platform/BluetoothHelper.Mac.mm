@@ -1,83 +1,230 @@
 #include "BluetoothHelper.h"
 
+#include <cctype>
+#include <condition_variable>
+#include <mutex>
+#include <set>
 #include <spdlog/spdlog.h>
 #include <thread>
 
+#import <CoreBluetooth/CoreBluetooth.h>
 #import <IOBluetooth/IOBluetooth.h>
 
-void *BluetoothHelper::g_DeviceInquiry{};
-void *BluetoothHelper::g_InquiryDelegate{};
+#include "BluetoothRunLoop.Mac.h"
 
-@interface BluetoothScannerDelegate : NSObject <IOBluetoothDeviceInquiryDelegate>
-@property(atomic, strong) NSMutableArray *foundDevices;
+constexpr auto PAIRING_TIMEOUT = std::chrono::seconds(60);
+
+@interface PCBUInquiryDelegate : NSObject <IOBluetoothDeviceInquiryDelegate>
+@property(nonatomic, strong) NSMutableDictionary<NSString *, IOBluetoothDevice *> *foundDevices;
+@property(nonatomic) bool isRunning;
 @end
 
-@implementation BluetoothScannerDelegate
+@implementation PCBUInquiryDelegate
 - (instancetype)init {
   self = [super init];
   if(self) {
-    _foundDevices = [NSMutableArray array];
+    _foundDevices = [NSMutableDictionary dictionary];
+    _isRunning = true;
   }
   return self;
 }
 
 - (void)deviceInquiryDeviceFound:(IOBluetoothDeviceInquiry *)sender device:(IOBluetoothDevice *)device {
-  [_foundDevices addObject:device];
+  auto address = [device addressString];
+  if(!address)
+    return;
+  // May run on the main run loop while ScanDevices() reads on the BluetoothRunLoop thread
+  @synchronized(_foundDevices) {
+    _foundDevices[address] = device;
+  }
+}
+
+- (void)deviceInquiryComplete:(IOBluetoothDeviceInquiry *)sender error:(IOReturn)error aborted:(BOOL)aborted {
+  // An inquiry ends after a few seconds, keep scanning until StopScan()
+  if(!_isRunning || aborted)
+    return;
+  auto status = [sender start];
+  if(status != kIOReturnSuccess)
+    spdlog::error("Restarting Bluetooth inquiry failed. (Code={:#x})", static_cast<uint32_t>(status));
 }
 @end
 
+@interface PCBUPairingDelegate : NSObject {
+@public
+  std::mutex mutex;
+  std::condition_variable cv;
+  bool isDone;
+  IOReturn status;
+}
+@end
+
+@implementation PCBUPairingDelegate
+- (void)devicePairingFinished:(id)sender error:(IOReturn)error {
+  std::lock_guard lock(mutex);
+  isDone = true;
+  status = error;
+  cv.notify_all();
+}
+@end
+
+// Only accessed on the Bluetooth run loop thread
+static PCBUInquiryDelegate *g_InquiryDelegate = nil;
+static IOBluetoothDeviceInquiry *g_DeviceInquiry = nil;
+
+static std::string FormatAddress(IOBluetoothDevice *device) {
+  auto address = [device getAddress];
+  if(!address)
+    return {};
+  char str[18]{};
+  snprintf(str, sizeof(str), "%02X:%02X:%02X:%02X:%02X:%02X", address->data[0], address->data[1], address->data[2], address->data[3], address->data[4],
+           address->data[5]);
+  return str;
+}
+
 bool BluetoothHelper::IsAvailable() {
   @autoreleasepool {
-    return [[IOBluetoothHostController defaultController] powerState] == kBluetoothHCIPowerStateON;
+    auto authorization = [CBManager authorization];
+    if(authorization == CBManagerAuthorizationDenied || authorization == CBManagerAuthorizationRestricted) {
+      spdlog::warn("Bluetooth permission was not granted. (Authorization={})", static_cast<int>(authorization));
+      return false;
+    }
+    if(authorization == CBManagerAuthorizationNotDetermined)
+      spdlog::info("Bluetooth permission has not been asked for yet.");
+    auto controller = [IOBluetoothHostController defaultController];
+    if(!controller) {
+      spdlog::warn("No Bluetooth controller found. (Authorization={})", static_cast<int>(authorization));
+      return false;
+    }
+    auto powerState = [controller powerState];
+    if(powerState != kBluetoothHCIPowerStateON) {
+      spdlog::warn("Bluetooth is not powered on. (PowerState={}, Authorization={})", static_cast<int>(powerState), static_cast<int>(authorization));
+      return false;
+    }
+    return true;
   }
 }
 
 void BluetoothHelper::StartScan() {
-  g_InquiryDelegate = [[BluetoothScannerDelegate alloc] init];
-  g_DeviceInquiry = [IOBluetoothDeviceInquiry inquiryWithDelegate:(id)g_InquiryDelegate];
-  auto inquiry = (IOBluetoothDeviceInquiry *)g_DeviceInquiry;
-  [inquiry start];
+  BluetoothRunLoop::Run([]() {
+    if(g_DeviceInquiry)
+      return;
+    g_InquiryDelegate = [[PCBUInquiryDelegate alloc] init];
+    g_DeviceInquiry = [IOBluetoothDeviceInquiry inquiryWithDelegate:g_InquiryDelegate];
+    [g_DeviceInquiry setUpdateNewDeviceNames:YES];
+    auto status = [g_DeviceInquiry start];
+    if(status != kIOReturnSuccess)
+      spdlog::error("Starting Bluetooth inquiry failed. (Code={:#x})", static_cast<uint32_t>(status));
+  });
 }
 
 void BluetoothHelper::StopScan() {
-  auto delegate = (BluetoothScannerDelegate *)g_InquiryDelegate;
-  auto inquiry = (IOBluetoothDeviceInquiry *)g_DeviceInquiry;
-  [inquiry stop];
-  //[inquiry release];
-  //[delegate release];
-  g_InquiryDelegate = nullptr;
-  g_DeviceInquiry = nullptr;
+  BluetoothRunLoop::Run([]() {
+    if(!g_DeviceInquiry)
+      return;
+    g_InquiryDelegate.isRunning = false;
+    [g_DeviceInquiry stop];
+    [g_DeviceInquiry setDelegate:nil];
+    g_DeviceInquiry = nil;
+    g_InquiryDelegate = nil;
+  });
 }
 
 std::vector<BluetoothDevice> BluetoothHelper::ScanDevices() {
-  std::vector<BluetoothDevice> result{};
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-  if(g_InquiryDelegate == nullptr) {
-    spdlog::error("Error: Scan not started");
-    return result;
-  }
-  auto delegate = (BluetoothScannerDelegate *)g_InquiryDelegate;
-  for(IOBluetoothDevice *device in delegate.foundDevices) {
-    NSString *deviceAddr = [device addressString];
-    if(deviceAddr) {
-      BluetoothDevice dev{};
-      dev.address = std::string([deviceAddr UTF8String]);
-      auto deviceName = [device name];
-      if(deviceName)
-        dev.name = std::string([deviceName UTF8String]);
-      else
-        dev.name = "Unknown device";
-      result.emplace_back(dev);
+  std::vector<BluetoothDevice> result{};
+  BluetoothRunLoop::Run([&result]() {
+    std::set<std::string> addresses{};
+    auto addDevice = [&](IOBluetoothDevice *device) {
+      auto address = FormatAddress(device);
+      if(address.empty() || !addresses.insert(address).second)
+        return;
+      auto name = [device name];
+      result.push_back({name ? std::string([name UTF8String]) : "Unknown device", address});
+    };
+    // A paired phone is not necessarily discoverable, so list paired devices too (like Windows does)
+    for(IOBluetoothDevice *device in [IOBluetoothDevice pairedDevices])
+      addDevice(device);
+    if(!g_InquiryDelegate) {
+      spdlog::error("Error: Scan not started");
+      return;
     }
-  }
+    NSArray<IOBluetoothDevice *> *foundDevices = nil;
+    @synchronized(g_InquiryDelegate.foundDevices) {
+      foundDevices = g_InquiryDelegate.foundDevices.allValues;
+    }
+    for(IOBluetoothDevice *device in foundDevices)
+      addDevice(device);
+  });
   return result;
 }
 
 bool BluetoothHelper::PairDevice(const BluetoothDevice &device) {
-  /*@autoreleasepool { // ToDo
-      auto ioDevice = [IOBluetoothDevice deviceWithAddressString:[NSString stringWithUTF8String:device.address.c_str()]];
-      auto pair = [IOBluetoothDevicePair pairWithDevice:ioDevice];
-      [pair start];
-  }*/
-  return false;
+  BluetoothDeviceAddress address{};
+  if(!ParseAddress(device.address, address.data)) {
+    spdlog::error("Invalid Bluetooth address format: {}", device.address);
+    return false;
+  }
+
+  auto delegate = [[PCBUPairingDelegate alloc] init];
+  IOBluetoothDevicePair *pair = nil;
+  auto isPaired = false;
+  IOReturn status = kIOReturnSuccess;
+  BluetoothRunLoop::Run([&]() {
+    auto ioDevice = [IOBluetoothDevice deviceWithAddress:&address];
+    if(!ioDevice) {
+      status = kIOReturnNotFound;
+      return;
+    }
+    if([ioDevice isPaired]) {
+      isPaired = true;
+      return;
+    }
+    pair = [IOBluetoothDevicePair pairWithDevice:ioDevice];
+    [pair setDelegate:delegate];
+    status = [pair start];
+  });
+  if(isPaired) {
+    spdlog::info("Bluetooth device is already paired.");
+    return true;
+  }
+
+  auto isDone = false;
+  if(status == kIOReturnSuccess) {
+    std::unique_lock lock(delegate->mutex);
+    isDone = delegate->cv.wait_for(lock, PAIRING_TIMEOUT, [delegate]() { return delegate->isDone; });
+    status = delegate->status;
+  }
+  BluetoothRunLoop::Run([&]() {
+    if(!pair)
+      return;
+    if(!isDone)
+      [pair stop];
+    [pair setDelegate:nil];
+    pair = nil;
+  });
+
+  if(status == kIOReturnSuccess && !isDone) {
+    spdlog::error("Bluetooth pairing timed out.");
+    return false;
+  }
+  if(status != kIOReturnSuccess) {
+    spdlog::error("Error while bluetooth pairing. (Code={:#x})", static_cast<uint32_t>(status));
+    return false;
+  }
+  return true;
+}
+
+bool BluetoothHelper::ParseAddress(const std::string &address, uint8_t (&bytes)[6]) {
+  std::string hex{};
+  for(auto c : address) {
+    if(std::isxdigit(static_cast<unsigned char>(c)))
+      hex += c;
+    else if(c != ':' && c != '-')
+      return false;
+  }
+  if(hex.size() != 12)
+    return false;
+  for(size_t i = 0; i < 6; i++)
+    bytes[i] = static_cast<uint8_t>(std::stoul(hex.substr(i * 2, 2), nullptr, 16));
+  return true;
 }

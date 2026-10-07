@@ -1,5 +1,6 @@
 #include "ServiceInstaller.h"
 
+#include "BTHelperService.Mac.h"
 #include "EnvHelper.h"
 #include "shell/Shell.h"
 #include "utils/ResourceHelper.h"
@@ -7,6 +8,7 @@
 #define EXE_MODULE_DIR std::filesystem::path("/usr/local/sbin/")
 #define EXE_MODULE_FILE "pcbu_auth"
 #define SSH_MODULE_FILE "pcbu_ssh_askpass"
+#define SSH_MODULE_FILE_OLD "pcbu_ssh_askpass"
 
 #define PAM_MODULE_DIR std::filesystem::path("/usr/local/lib/pam/")
 #define PAM_MODULE_FILE "pam_pulseunlock.dylib"
@@ -79,6 +81,20 @@ void ServiceInstaller::Install() {
   result = Shell::RunCommand(fmt::format("chmod +x {0} && chmod u+s {0}", askpassPath.string())).exitCode == 0;
   if(!result)
     throw std::runtime_error(I18n::Get("error_exec_setuid", askpassPath.string()));
+  auto oldAskpassPath = EXE_MODULE_DIR / SSH_MODULE_FILE_OLD;
+  if(std::filesystem::exists(oldAskpassPath)) {
+    result = Shell::Remove(oldAskpassPath);
+    if(!result)
+      throw std::runtime_error(I18n::Get("error_file_remove", oldAskpassPath.string()));
+  }
+  if(EnvHelper::IsSshEnabled())
+    EnvHelper::SetSshEnabled(true); // Repoints a legacy SSH_ASKPASS line to the new binary
+
+  // Bluetooth is optional, so a failure here does not fail the install
+  m_Logger("Registering Bluetooth helper...");
+  std::string helperError{};
+  if(!BTHelperService::Register(helperError))
+    m_Logger(fmt::format("Bluetooth helper is not enabled, Bluetooth unlock will only work inside the app. ({})", helperError));
 
   // Migration
   m_PAMHelper.MigrateConfigEntry(PAM_AUTHORIZATION_CONFIG, PAM_CONFIG_ENTRY_OLD, PAM_CONFIG_ENTRY);
@@ -124,8 +140,10 @@ void ServiceInstaller::Uninstall(bool fullUninstall) {
   }
 
   m_Logger("Removing SSH module...");
-  auto askpassPath = EXE_MODULE_DIR / SSH_MODULE_FILE;
-  if(std::filesystem::exists(askpassPath)) {
+  for(const auto &moduleFile : {SSH_MODULE_FILE, SSH_MODULE_FILE_OLD}) {
+    auto askpassPath = EXE_MODULE_DIR / moduleFile;
+    if(!std::filesystem::exists(askpassPath))
+      continue;
     result = Shell::Remove(askpassPath);
     if(!result)
       throw std::runtime_error(I18n::Get("error_file_remove", askpassPath.string()));
@@ -135,6 +153,9 @@ void ServiceInstaller::Uninstall(bool fullUninstall) {
     m_Logger("Removing SSH integration...");
     EnvHelper::SetSshEnabled(false);
   }
+
+  m_Logger("Removing Bluetooth helper...");
+  BTHelperService::Unregister();
   m_Logger("Done.");
 }
 

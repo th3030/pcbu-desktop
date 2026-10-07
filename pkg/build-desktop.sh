@@ -173,6 +173,7 @@ elif [[ "$PLATFORM" == "mac" ]]; then
     mac_sign "$framework"
   done
   mac_sign desktop/pcbu_desktop.app/Contents/MacOS/pcbu_elevator
+  mac_sign desktop/pcbu_desktop.app/Contents/MacOS/pcbu_bthelper
   mac_sign --entitlements ../mac/entitlements.plist desktop/pcbu_desktop.app
 
   rm -Rf dmg_dir/ || true
