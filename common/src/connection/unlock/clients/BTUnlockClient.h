@@ -12,9 +12,11 @@ public:
 
   bool Start() override;
   void Stop() override;
+  UnlockState PollResult() override;
 
 private:
   void ConnectThread();
+  static bool IsPhoneError(UnlockState state);
 
   int m_Channel;
   SOCKET m_ClientSocket;
@@ -32,6 +34,16 @@ private:
   static std::string firstClientUsername;
   static std::string lastRememberedUsername;
   static std::string secondClientUsername;
+
+  // An error reported through one of the two clients of a device, by device address, so the other client
+  // reports it too instead of a timeout. Only errors raised after this client started apply.
+  struct PairError {
+    UnlockState state{};
+    std::chrono::steady_clock::time_point time{};
+  };
+  static std::map<std::string, PairError> pairErrors;
+  static std::mutex pairErrorsMutex;
+  std::chrono::steady_clock::time_point m_StartTime{};
 };
 
 #endif

@@ -26,6 +26,8 @@ bool BTUnlockClient::credentialSwitch = false;
 std::string BTUnlockClient::firstClientUsername = "";
 std::string BTUnlockClient::lastRememberedUsername = "";
 std::string BTUnlockClient::secondClientUsername = "";
+std::map<std::string, BTUnlockClient::PairError> BTUnlockClient::pairErrors{};
+std::mutex BTUnlockClient::pairErrorsMutex{};
 std::chrono::steady_clock::time_point globalLastLogTime = std::chrono::steady_clock::now();
 
 #ifdef WINDOWS
@@ -66,6 +68,7 @@ bool BTUnlockClient::Start() {
   if(m_IsRunning)
     return true;
 
+  m_StartTime = std::chrono::steady_clock::now();
   if(isAlreadyConnected)
     isAlreadyConnected = false;
   if(otherClientConnectedFirst)
@@ -148,6 +151,28 @@ void BTUnlockClient::Stop() {
   m_IsRunning = false;
   if(m_AcceptThread.joinable())
     m_AcceptThread.join();
+}
+
+UnlockState BTUnlockClient::PollResult() {
+  auto state = BaseUnlockConnection::PollResult();
+  std::lock_guard lock(pairErrorsMutex);
+  if(IsPhoneError(state)) {
+    pairErrors[m_DeviceAddress] = {state, std::chrono::steady_clock::now()};
+    return state;
+  }
+  if(state == UnlockState::SUCCESS)
+    return state;
+
+  // The other client of this device got an answer from the phone, report that instead of a timeout
+  auto it = pairErrors.find(m_DeviceAddress);
+  if(it != pairErrors.end() && it->second.time >= m_StartTime)
+    return it->second.state;
+  return state;
+}
+
+bool BTUnlockClient::IsPhoneError(UnlockState state) {
+  return state == UnlockState::TIME_ERROR || state == UnlockState::NOT_PAIRED_ERROR || state == UnlockState::APP_ERROR ||
+         state == UnlockState::DATA_ERROR || state == UnlockState::PROTOCOL_ERROR;
 }
 
 void BTUnlockClient::ConnectThread() {

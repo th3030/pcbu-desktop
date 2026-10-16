@@ -44,7 +44,7 @@ public:
   void SetUnlockInfo(const std::string &authUser, const std::string &authProgram);
   void SetAllowedDevices(const std::vector<PairedDevice> &devices);
 
-  UnlockState PollResult();
+  virtual UnlockState PollResult();
 
 protected:
   void SetPhase(UnlockPhase phase);

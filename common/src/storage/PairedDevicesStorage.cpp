@@ -9,6 +9,10 @@
 #include "shell/Shell.h"
 #include "utils/StringUtils.h"
 
+#ifdef APPLE
+#include "BluetoothUsersStorage.Mac.h"
+#endif
+
 std::vector<PairedDevice> PairedDevicesStorage::g_Cache{};
 std::mutex PairedDevicesStorage::g_Mutex{};
 
@@ -170,6 +174,9 @@ void PairedDevicesStorage::SaveDevices(const std::vector<PairedDevice> &devices)
     if(!isWritten)
       throw std::runtime_error(fmt::format("Error writing '{}'.", filePath.string()));
     g_Cache = devices;
+#ifdef APPLE
+    BluetoothUsersStorage::Update(devices);
+#endif
   } catch(const std::exception &ex) {
     spdlog::error("Failed writing paired devices storage: {}", ex.what());
   }

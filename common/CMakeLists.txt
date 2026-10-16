@@ -56,6 +56,10 @@ elseif(APPLE)
             src/platform/BluetoothHelper.Mac.mm
             src/platform/BluetoothRunLoop.Mac.mm
             src/platform/BluetoothRunLoop.Mac.h
+            src/storage/MacAgentStorage.cpp
+            src/storage/MacAgentStorage.h
+            src/storage/BluetoothUsersStorage.Mac.cpp
+            src/storage/BluetoothUsersStorage.Mac.h
     )
 elseif(UNIX)
     find_package(PkgConfig REQUIRED)
