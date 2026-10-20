@@ -45,6 +45,13 @@ int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **ar
     return PAM_IGNORE;
   }
 
+#ifdef APPLE
+  // A password was already entered, e.g. typed in by the login window agent, so let the normal password check handle it
+  const void *authTok = nullptr;
+  if(pam_get_item(pamh, PAM_AUTHTOK, &authTok) == PAM_SUCCESS && authTok && *static_cast<const char *>(authTok) != '\0')
+    return PAM_IGNORE;
+#endif
+
   int pipeFd[2]{};
   bool hasPipe = false;
   if(!pipe(pipeFd)) {
