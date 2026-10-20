@@ -15,7 +15,7 @@ AgentController::AgentController(AgentMode mode)
     : m_Overlay([this]() { OnRetry(); }, [this]() { OnCancel(); }), m_LockMonitor([this](bool isLocked) { OnLockChanged(isLocked); }),
       m_ActivityMonitor([this]() { OnActivity(); }, mode == AgentMode::LOCK_SCREEN) {
   m_Mode = mode;
-  m_InjectQueue = dispatch_queue_create("com.meisapps.PulseUnlock.Agent.Inject", DISPATCH_QUEUE_SERIAL);
+  m_InjectQueue = dispatch_queue_create("com.tapps.BioKeyPhone.Agent.Inject", DISPATCH_QUEUE_SERIAL);
 }
 
 void AgentController::Start() {
@@ -71,7 +71,7 @@ void AgentController::OnLockChanged(bool isLocked) {
 }
 
 void AgentController::OnActivity() {
-  if(m_State == AgentState::ARMED || (m_State == AgentState::FAILED && m_CanAutoRetry))
+  if(m_State == AgentState::ARMED)
     StartAuth();
 }
 
@@ -84,7 +84,7 @@ void AgentController::OnCancel() {
   if(m_State != AgentState::RUNNING && m_State != AgentState::ARMED)
     return;
   spdlog::info("Unlock canceled by user.");
-  Fail(I18n::Get("unlock_canceled"), false);
+  Fail(I18n::Get("unlock_canceled"));
 }
 
 void AgentController::OnTick() {
@@ -117,13 +117,13 @@ void AgentController::OnAuthFinished(uint64_t generation, const AuthResult &resu
   WipePassword(password);
   if(result.exitCode == 0) {
     spdlog::error("pcbu_auth succeeded without returning a password.");
-    Fail(I18n::Get("error_unknown"), false);
+    Fail(I18n::Get("error_unknown"));
     return;
   }
   auto message = result.lastStatus;
   if(message.empty())
     message = I18n::Get(result.exitCode == 1 ? "unlock_canceled" : "error_unknown");
-  Fail(message, result.exitCode != 1 && ParseUnlockState(message) != UnlockState::CLOUD_RATE_LIMITED);
+  Fail(message);
 }
 
 void AgentController::Activate() {
@@ -221,7 +221,7 @@ void AgentController::Inject(uint64_t generation, std::shared_ptr<std::string> p
   if(!AccessibilityPermission::IsGranted()) {
     WipePassword(password);
     spdlog::error("Accessibility access missing, cannot type password.");
-    Fail(I18n::Get("error_accessibility_missing"), false);
+    Fail(I18n::Get("error_accessibility_missing"));
     return;
   }
   if(m_Mode == AgentMode::LOCK_SCREEN && (!m_LockMonitor.IsLocked() || !LockStateMonitor::IsSessionLocked())) {
@@ -233,20 +233,20 @@ void AgentController::Inject(uint64_t generation, std::shared_ptr<std::string> p
   if(m_Mode == AgentMode::LOGIN_WINDOW && LoginWindowInspector::GetSelectedUser() != m_UserName) {
     WipePassword(password);
     spdlog::warn("Selected user changed, skipping password injection.");
-    Fail(I18n::Get("wait_select_user"), false);
+    Fail(I18n::Get("wait_select_user"));
     return;
   }
   if(LoginWindowInspector::IsOtherElementFocused()) {
     WipePassword(password);
     spdlog::warn("Focused element is not a password field, skipping password injection.");
-    Fail(I18n::Get("error_password_field"), false);
+    Fail(I18n::Get("error_password_field"));
     return;
   }
   if(m_ActivityMonitor.GetSecondsSinceKeyPress() < TYPING_QUIET_TIME) {
     if(attempt >= TYPING_MAX_ATTEMPTS) {
       WipePassword(password);
       spdlog::warn("User is typing, skipping password injection.");
-      Fail(I18n::Get("error_typing_detected"), false);
+      Fail(I18n::Get("error_typing_detected"));
       return;
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, TYPING_RETRY_DELAY_MS * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
@@ -259,13 +259,23 @@ void AgentController::Inject(uint64_t generation, std::shared_ptr<std::string> p
   m_Overlay.Show(I18n::Get("unlock_success"), OverlayStyle::SUCCESS);
   auto injector = m_Mode == AgentMode::LOCK_SCREEN ? std::make_shared<PasswordInjector>() : nullptr;
   dispatch_async(m_InjectQueue, ^{
+    auto shouldContinue = [this, generation]() { return m_Generation.load() == generation; };
     if(injector) {
-      injector->Type(*password, [this, generation]() { return m_Generation.load() == generation; });
+      // Typed key presses only reach the field if it has focus, which the lock screen does not always give it
+      if(!LoginWindowInspector::FocusPasswordField(shouldContinue)) {
+        WipePassword(password);
+        dispatch_async(dispatch_get_main_queue(), ^{
+          if(generation == m_Generation && m_State == AgentState::INJECTING)
+            Fail(I18n::Get("error_password_field"));
+        });
+        return;
+      }
+      injector->Type(*password, shouldContinue);
     } else if(!LoginWindowInspector::SubmitPassword(*password)) {
       WipePassword(password);
       dispatch_async(dispatch_get_main_queue(), ^{
         if(generation == m_Generation && m_State == AgentState::INJECTING)
-          Fail(I18n::Get("error_password_field"), false);
+          Fail(I18n::Get("error_password_field"));
       });
       return;
     }
@@ -279,21 +289,19 @@ void AgentController::Inject(uint64_t generation, std::shared_ptr<std::string> p
         return;
       }
       spdlog::warn("No unlock after typing the password.");
-      Fail(I18n::Get("error_password"), false);
+      Fail(I18n::Get("error_password"));
     });
   });
 }
 
-void AgentController::Fail(const std::string &message, bool canAutoRetry) {
+// Only the Retry button starts again, so typing or touching the Mac after a failure does not spam the phone
+void AgentController::Fail(const std::string &message) {
   StopAuth();
   m_ActivityMonitor.Stop();
   m_Generation++;
-  m_CanAutoRetry = canAutoRetry;
   SetState(AgentState::FAILED);
   m_Overlay.Show(message, ParseUnlockState(message) == UnlockState::CANCELED ? OverlayStyle::CANCELED : OverlayStyle::ERROR);
   spdlog::info("Unlock result: {}", message);
-  if(canAutoRetry)
-    m_ActivityMonitor.Start(RETRY_COOLDOWN);
 }
 
 void AgentController::Reset() {

@@ -43,7 +43,7 @@ private:
   void Arm();
   void StartAuth();
   void Inject(uint64_t generation, std::shared_ptr<std::string> password, int attempt);
-  void Fail(const std::string &message, bool canAutoRetry);
+  void Fail(const std::string &message);
   void Reset();
   void StopAuth();
   void SetState(AgentState state);
@@ -59,7 +59,6 @@ private:
   AgentState m_State{AgentState::IDLE};
   PCBUAppStorage m_Settings{};
   std::string m_UserName{};
-  bool m_CanAutoRetry{};
   bool m_HasRequestedAccessibility{};
   std::atomic<uint64_t> m_Generation{};
   uint64_t m_TickCount{};
@@ -78,7 +77,6 @@ private:
   static constexpr uint64_t USER_CHECK_TICKS = 4;
   static constexpr NSTimeInterval STATUS_INTERVAL = 1.0;
   static constexpr CFTimeInterval ARM_GRACE_PERIOD = 0.3;
-  static constexpr CFTimeInterval RETRY_COOLDOWN = 3.0;
   static constexpr CFTimeInterval TYPING_QUIET_TIME = 1.5;
   static constexpr int TYPING_MAX_ATTEMPTS = 30;
   static constexpr int64_t TYPING_RETRY_DELAY_MS = 100;
