@@ -1,4 +1,20 @@
-# PulseUnlock for macOS - Installation Guide
+# PulseUnlock for macOS
+
+> **⚠️ Remove the quarantine before the first launch**
+>
+> PulseUnlock is not signed by Apple, so macOS quarantines the downloaded app and may refuse to open it. After dragging **PulseUnlock.app** into the **Applications** folder, run this once in Terminal:
+>
+> ```bash
+> sudo xattr -dr com.apple.quarantine /Applications/PulseUnlock.app
+> ```
+>
+> Then start PulseUnlock and press **Install**. Homebrew and OpenSSL are no longer needed, and everything else is set up from inside the app.
+
+The guide below is outdated and only kept for reference.
+
+---
+
+# PulseUnlock for macOS - Installation Guide (Outdated guide below)
 
 > **⚠️ Warning (Preview Build)**
 >
