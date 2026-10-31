@@ -15,7 +15,7 @@ AgentController::AgentController(AgentMode mode)
     : m_Overlay([this]() { OnRetry(); }, [this]() { OnCancel(); }), m_LockMonitor([this](bool isLocked) { OnLockChanged(isLocked); }),
       m_ActivityMonitor([this]() { OnActivity(); }, mode == AgentMode::LOCK_SCREEN) {
   m_Mode = mode;
-  m_InjectQueue = dispatch_queue_create("com.tapps.BioKeyPhone.Agent.Inject", DISPATCH_QUEUE_SERIAL);
+  m_InjectQueue = dispatch_queue_create("com.meisapps.PulseUnlock.Agent.Inject", DISPATCH_QUEUE_SERIAL);
 }
 
 void AgentController::Start() {

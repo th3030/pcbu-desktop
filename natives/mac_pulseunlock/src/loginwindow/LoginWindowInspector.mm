@@ -104,34 +104,19 @@ bool LoginWindowInspector::FocusPasswordField(const std::function<bool()> &shoul
       return true;
     }
     auto scan = ScanLoginWindow();
-    if(scan.passwordField) {
-      // The lock screen does not always accept the focus request, so click the field like a user would
-      if(attempt == FOCUS_CLICK_ATTEMPT && scan.passwordFieldFrame.has_value()) {
-        spdlog::info("Password field not focused, clicking it.");
-        ClickAt(CGPointMake(CGRectGetMidX(*scan.passwordFieldFrame), CGRectGetMidY(*scan.passwordFieldFrame)));
-      } else {
-        auto error = AXUIElementSetAttributeValue(scan.passwordField.get(), kAXFocusedAttribute, kCFBooleanTrue);
-        if(error != kAXErrorSuccess)
-          spdlog::warn("Failed focusing password field. (Code={})", static_cast<int>(error));
-      }
+    if(!scan.passwordField)
+      return false;
+    if(attempt == FOCUS_CLICK_ATTEMPT && scan.passwordFieldFrame.has_value()) {
+      spdlog::info("Password field not focused, clicking it...");
+      ClickAt(CGPointMake(CGRectGetMidX(*scan.passwordFieldFrame), CGRectGetMidY(*scan.passwordFieldFrame)));
+    } else {
+      auto error = AXUIElementSetAttributeValue(scan.passwordField.get(), kAXFocusedAttribute, kCFBooleanTrue);
+      if(error != kAXErrorSuccess)
+        spdlog::warn("Failed focusing password field. (Code={})", static_cast<int>(error));
     }
     usleep(FOCUS_RETRY_DELAY_US);
   }
-  auto isFocused = GetFocusedPasswordFieldFrame().has_value();
-  if(!isFocused)
-    spdlog::warn("Password field could not be focused.");
-  return isFocused;
-}
-
-void LoginWindowInspector::ClickAt(CGPoint point) {
-  for(auto type : {kCGEventLeftMouseDown, kCGEventLeftMouseUp}) {
-    auto event = CGEventCreateMouseEvent(nullptr, type, point, kCGMouseButtonLeft);
-    if(!event)
-      continue;
-    CGEventPost(kCGHIDEventTap, event);
-    CFRelease(event);
-    usleep(10000);
-  }
+  return GetFocusedPasswordFieldFrame().has_value();
 }
 
 AXUIElementRef LoginWindowInspector::CopyFocusedElement() {
@@ -291,4 +276,15 @@ std::vector<LocalUser> LoginWindowInspector::GetLocalUsers() {
   }
   endpwent();
   return result;
+}
+
+void LoginWindowInspector::ClickAt(CGPoint point) {
+  for(auto type : {kCGEventLeftMouseDown, kCGEventLeftMouseUp}) {
+    auto event = CGEventCreateMouseEvent(nullptr, type, point, kCGMouseButtonLeft);
+    if(!event)
+      continue;
+    CGEventPost(kCGHIDEventTap, event);
+    CFRelease(event);
+    usleep(CLICK_DELAY_US);
+  }
 }

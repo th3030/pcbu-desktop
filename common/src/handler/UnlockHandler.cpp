@@ -272,6 +272,15 @@ UnlockResult UnlockHandler::RunServer(BaseUnlockConnection *connection, UDPUnloc
     PrintStatus(connection, UnlockPhase::FINISHED);
   connection->Stop();
   keyScanner.Stop();
+#ifdef WINDOWS
+  // The state above can predate the phone's answer to the device's other client, and the delays in Stop()
+  // can make this client finish last, so its result is the one shown. Report the phone's answer instead.
+  if(state != UnlockState::SUCCESS && connection->GetDevice().pairingMethod == PairingMethod::BLUETOOTH) {
+    auto latestState = connection->PollResult();
+    if(latestState != UnlockState::UNKNOWN)
+      state = latestState;
+  }
+#endif
   spdlog::info("Connection result: {}", UnlockStateUtils::ToString(state));
 
   auto pwDec = CryptUtils::DecryptAES(connection->GetDevice().passwordEnc, connection->GetResponseData().passwordKey);

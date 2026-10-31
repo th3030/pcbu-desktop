@@ -1,9 +1,9 @@
 #include "ServiceInstaller.h"
 
-#include "BTHelperService.Mac.h"
-#include <QCoreApplication>
+#include <boost/dll/runtime_symbol_info.hpp>
 
-#include "EnvHelper.h"
+#include "installer/helpers/BTHelperService.Mac.h"
+#include "installer/helpers/EnvHelper.h"
 #include "shell/Shell.h"
 #include "storage/AppSettings.h"
 #include "storage/BluetoothUsersStorage.Mac.h"
@@ -49,25 +49,25 @@ std::vector<ServiceSetting> ServiceInstaller::GetSettings() {
            settings.unlockBehavior,
            "key_press_lock_only"},
           {"sudo", I18n::Get("service_setting_sudo"), PAMHelper::HasConfigEntry(PAM_SUDO_LOCAL_CONFIG, PAM_CONFIG_ENTRY), true},
-          {"macOS", I18n::Get("service_setting_mac_auth_dialog"), PAMHelper::HasConfigEntry(PAM_AUTHORIZATION_CONFIG, PAM_CONFIG_ENTRY), false},
           {"macLoginScreen", I18n::Get("service_setting_mac_login_screen"), settings.macLoginScreen, true},
+          {"macAuthDialog", I18n::Get("service_setting_mac_auth_dialog"), PAMHelper::HasConfigEntry(PAM_AUTHORIZATION_CONFIG, PAM_CONFIG_ENTRY), false},
           {"ssh", I18n::Get("service_setting_ssh"), EnvHelper::IsSshEnabled(), false}};
 }
 
 void ServiceInstaller::ApplySettings(const std::vector<ServiceSetting> &settings, bool useDefault) {
   for(auto setting : settings) {
     auto isEnabled = useDefault ? setting.defaultVal : setting.enabled;
-    if(setting.id == "macLoginScreen") {
-      auto storage = AppSettings::Get();
-      storage.macLoginScreen = isEnabled;
-      AppSettings::Save(storage);
-    } else if(setting.id == "unlockBehavior") {
+    if(setting.id == "unlockBehavior") {
       auto storage = AppSettings::Get();
       storage.unlockBehavior = useDefault ? setting.defaultValue : setting.selectedValue;
       AppSettings::Save(storage);
     } else if(setting.id == "sudo") {
       m_PAMHelper.SetConfigEntry(PAM_SUDO_LOCAL_CONFIG, PAM_CONFIG_ENTRY, isEnabled);
-    } else if(setting.id == "macOS") {
+    } else if(setting.id == "macLoginScreen") {
+      auto storage = AppSettings::Get();
+      storage.macLoginScreen = isEnabled;
+      AppSettings::Save(storage);
+    } else if(setting.id == "macAuthDialog") {
       m_PAMHelper.SetConfigEntry(PAM_AUTHORIZATION_CONFIG, PAM_CONFIG_ENTRY, isEnabled);
     } else if(setting.id == "ssh") {
       EnvHelper::SetSshEnabled(isEnabled);
@@ -132,7 +132,7 @@ void ServiceInstaller::Install() {
 
   // Agent
   m_Logger("Installing lock screen agent...");
-  auto agentSrc = std::filesystem::path(QCoreApplication::applicationDirPath().toStdString()) / ".." / "Library" / AGENT_BUNDLE_NAME;
+  auto agentSrc = std::filesystem::path(boost::dll::program_location().parent_path().string()) / ".." / "Library" / AGENT_BUNDLE_NAME;
   if(!std::filesystem::exists(agentSrc))
     throw std::runtime_error(I18n::Get("error_mac_agent_missing"));
 
@@ -145,8 +145,7 @@ void ServiceInstaller::Install() {
                                     StringUtils::ShellQuote(AGENT_INSTALL_DIR.string())));
   if(cmdResult.exitCode != 0)
     throw std::runtime_error(I18n::Get("error_file_write", agentPath.string()));
-  Shell::RunCommand(
-      fmt::format(R"(codesign -dv "{}" 2>&1 | grep -q "Signature=adhoc" && tccutil reset Accessibility {})", agentPath.string(), AGENT_BUNDLE_ID));
+  Shell::RunCommand(fmt::format("tccutil reset Accessibility {}", AGENT_BUNDLE_ID));
 
   auto plist = ResourceHelper::GetResource(":/res/mac/{}", AGENT_PLIST_FILE);
   auto plistPath = AGENT_PLIST_DIR / AGENT_PLIST_FILE;
@@ -160,6 +159,8 @@ void ServiceInstaller::Install() {
                                             AGENT_LABEL, plistPath.string()));
   if(cmdResult.exitCode != 0)
     m_Logger(fmt::format("Failed starting lock screen agent: {}", cmdResult.output));
+
+  InstallCli();
 
   // Migration
   m_PAMHelper.MigrateConfigEntry(PAM_AUTHORIZATION_CONFIG, PAM_CONFIG_ENTRY_OLD, PAM_CONFIG_ENTRY);
@@ -239,6 +240,7 @@ void ServiceInstaller::Uninstall(bool fullUninstall) {
   if(fullUninstall) {
     Shell::Remove(AGENT_INSTALL_DIR);
     Shell::RunCommand(fmt::format("tccutil reset Accessibility {}", AGENT_BUNDLE_ID));
+    UninstallCli();
   }
 
   m_Logger("Done.");

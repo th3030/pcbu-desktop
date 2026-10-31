@@ -3,7 +3,6 @@
 
 #include <functional>
 #include <optional>
-#include <string>
 #include <vector>
 
 #import <AppKit/AppKit.h>
@@ -21,41 +20,36 @@ public:
   [[nodiscard]] bool IsCancelChordPressed() const;
 
 private:
-  // Pauses while the Mac sleeps, like the input timestamps, so sleep time cancels out
-  static CFTimeInterval Now();
-
+  static CFTimeInterval GetTime();
   [[nodiscard]] CFTimeInterval GetSecondsSinceUserInput() const;
-  [[nodiscard]] std::string DescribeLastInput() const;
   static CFTimeInterval GetSecondsSinceHIDInput();
-  static bool IsAnyDisplayAwake();
+  [[nodiscard]] bool IsAnyDisplayAwake() const;
 
-  // Empty on Macs without a lid
   [[nodiscard]] std::optional<bool> IsLidClosed() const;
   void UpdateLidState();
   [[nodiscard]] bool WasLidJustOpened(CFTimeInterval now) const;
+  void OnScreenWake();
+  [[nodiscard]] bool WasScreenJustWokenByUser(CFTimeInterval now) const;
 
   void Poll();
-  void Fire(const std::string &reason);
+  void Fire();
 
   std::function<void()> m_OnActivity{};
   NSTimer *m_PollTimer{};
-  id m_WakeObserver{};
-  std::vector<id> m_LidObservers{};
-  io_service_t m_RootDomain{};
   CFTimeInterval m_ArmTime{};
   CFTimeInterval m_GracePeriod{};
-  // Only input after this time counts
   CFTimeInterval m_InputBaseline{};
   bool m_CanReadEventSource{};
+
+  io_service_t m_RootDomain{};
+  std::vector<id> m_PowerObservers{};
   bool m_WasLidClosed{};
   CFTimeInterval m_LidOpenedAt{};
+  CFTimeInterval m_UserWokeScreenAt{};
 
   static constexpr NSTimeInterval POLL_INTERVAL = 0.05;
-  // Opening the lid counts as a key press, but only shortly after it happened
-  static constexpr CFTimeInterval LID_OPEN_WINDOW = 10.0;
-  // macOS can reset the input timer on background wakes without a key press. A real key press turns the display on within this time.
-  static constexpr CFTimeInterval DISPLAY_WAKE_WINDOW = 2.0;
-  // Keeps an already handled input from being detected again due to rounding
+  static constexpr CFTimeInterval WAKE_WINDOW = 5.0;
+  static constexpr CFTimeInterval DISPLAY_WAKE_WINDOW = 5.0;
   static constexpr CFTimeInterval INPUT_TIME_TOLERANCE = 0.1;
 };
 

@@ -27,7 +27,6 @@ public:
   static bool IsOtherElementFocused();
   static std::string GetSelectedUser();
   static bool SubmitPassword(const std::string &password);
-  // Makes sure the password field has keyboard focus before typing into it. Blocks for up to FOCUS_MAX_ATTEMPTS * FOCUS_RETRY_DELAY_US.
   static bool FocusPasswordField(const std::function<bool()> &shouldContinue);
 
 private:
@@ -45,9 +44,10 @@ private:
   static void ClickAt(CGPoint point);
 
   static constexpr float MESSAGING_TIMEOUT = 0.25f;
-  static constexpr int FOCUS_MAX_ATTEMPTS = 20;
+  static constexpr int FOCUS_MAX_ATTEMPTS = 10;
   static constexpr int FOCUS_CLICK_ATTEMPT = 5;
   static constexpr useconds_t FOCUS_RETRY_DELAY_US = 100000;
+  static constexpr useconds_t CLICK_DELAY_US = 10000;
   static constexpr int MAX_TREE_DEPTH = 12;
   static constexpr size_t MAX_TREE_ELEMENTS = 512;
 };
