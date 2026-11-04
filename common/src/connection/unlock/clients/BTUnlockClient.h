@@ -1,5 +1,5 @@
-#ifndef PAM_PCBIOUNLOCK_BTUNLOCKCLIENT_H
-#define PAM_PCBIOUNLOCK_BTUNLOCKCLIENT_H
+#ifndef PAM_BIOKEYPHONE_BTUNLOCKCLIENT_H
+#define PAM_BIOKEYPHONE_BTUNLOCKCLIENT_H
 #ifdef APPLE
 #include "BTUnlockClient.Mac.h"
 #else
@@ -8,7 +8,8 @@
 
 class BTUnlockClient : public BaseUnlockConnection {
 public:
-  BTUnlockClient(const std::string& deviceAddress, const PairedDevice& device, const bool &otherClient);
+  BTUnlockClient(const std::string& deviceAddress, const PairedDevice& device, const bool &otherClient, bool isRetry = false,
+                 const std::atomic<bool> *isRequestActive = nullptr);
 
   bool Start() override;
   void Stop() override;
@@ -17,10 +18,15 @@ public:
 private:
   void ConnectThread();
   static bool IsPhoneError(UnlockState state);
+  bool IsAbandoned() const;
 
   int m_Channel;
   SOCKET m_ClientSocket;
   std::string m_DeviceAddress;
+  bool m_IsRetry{};
+  bool m_HasConnected{};
+  const std::atomic<bool> *m_IsRequestActive{};
+  std::atomic<bool> m_StopRequested{};
   // The global time variable
   std::chrono::steady_clock::time_point globalLastLogTime;
   // The mutex protecting globalLastLogTime
@@ -28,7 +34,6 @@ private:
   static bool isAlreadyConnected;
   static bool otherClientConnectedFirst;
   static bool hasConnected;
-  static bool delayConnect;
   static bool successfullConnect;
   static bool credentialSwitch;
   static std::string firstClientUsername;
@@ -47,4 +52,4 @@ private:
 };
 
 #endif
-#endif // PAM_PCBIOUNLOCK_BTUNLOCKCLIENT_H
+#endif // PAM_BIOKEYPHONE_BTUNLOCKCLIENT_H

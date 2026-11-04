@@ -4,7 +4,6 @@
 
 #include "KeyScanner.h"
 #include "connection/unlock/clients/BTUnlockClient.h"
-#include "connection/unlock/clients/CloudUnlockClient.h"
 #include "connection/unlock/clients/TCPUnlockClient.h"
 #include "connection/unlock/servers/TCPUnlockServer.h"
 #include "storage/AppSettings.h"
@@ -23,6 +22,12 @@
 
 bool UnlockHandler::otherClientConnectedFirst = false;
 bool UnlockHandler::netDownError = false;
+
+// States that only come from an answer of the phone itself
+static bool IsPhoneAnswer(UnlockState state) {
+  return state == UnlockState::TIME_ERROR || state == UnlockState::NOT_PAIRED_ERROR || state == UnlockState::APP_ERROR ||
+         state == UnlockState::DATA_ERROR || state == UnlockState::PROTOCOL_ERROR;
+}
 
 UnlockHandler::UnlockHandler(const std::function<void(std::string)> &printMessage) {
   m_PrintMessage = printMessage;
@@ -53,7 +58,7 @@ void UnlockHandler::PrintStatus(const std::string &message) {
 }
 
 UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::string &authProgram, const std::vector<std::string> &deviceIds,
-                                      std::atomic<bool> *isRunning) {
+                                      std::atomic<bool> *isRunning, bool isRetry) {
   auto settings = AppSettings::Get();
   auto devices = PairedDevicesStorage::GetDevicesForUser(authUser);
   auto hasTCPServer = false;
@@ -74,8 +79,8 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
         break;
       case PairingMethod::BLUETOOTH:
 #ifdef WINDOWS
-        connection = new BTUnlockClient(device.bluetoothAddress, device, false);
-        btConnection = new BTUnlockClient(device.bluetoothAddress, device, true);
+        connection = new BTUnlockClient(device.bluetoothAddress, device, false, isRetry, isRunning);
+        btConnection = new BTUnlockClient(device.bluetoothAddress, device, true, isRetry, isRunning);
 #else
         connection = new BTUnlockClient(device.bluetoothAddress, device, false);
 #endif
@@ -90,9 +95,6 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
         hasTCPServer = true;
         continue;
       }
-      case PairingMethod::CLOUD:
-        connection = new CloudUnlockClient(device);
-        break;
       default: {
         spdlog::error("Invalid pairing method.");
         continue;
@@ -127,11 +129,12 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
   AtomicUnlockResult currentResult{};
   std::atomic completed(0);
   std::mutex mutex{};
+  std::mutex resultMutex{};
   std::condition_variable cv{};
   auto numServers = connections.size();
   threads.reserve(numServers);
   for(auto connection : connections) {
-    threads.emplace_back([this, connection, numServers, isRunning, &currentResult, &completed, &cv, &mutex, udpBroadcaster, udpServer]() {
+    threads.emplace_back([this, connection, numServers, isRunning, &currentResult, &completed, &cv, &mutex, &resultMutex, udpBroadcaster, udpServer]() {
       auto serverResult = UnlockResult(UnlockState::UNK_ERROR);
       try {
         serverResult = RunServer(connection, connection == udpServer ? udpBroadcaster : nullptr, &currentResult, isRunning);
@@ -140,17 +143,30 @@ UnlockResult UnlockHandler::GetResult(const std::string &authUser, const std::st
       } catch(...) {
         spdlog::error("Unlock server failed.");
       }
-      if(serverResult.state == UnlockState::SUCCESS)
-        currentResult.store(serverResult);
-      auto isLast = completed.fetch_add(1) + 1 == numServers;
       auto isFinalResult = serverResult.state == UnlockState::SUCCESS;
-      if(isLast && currentResult.load().state != UnlockState::SUCCESS) {
-        currentResult.store(serverResult);
-        isFinalResult = true;
+      auto isLast = false;
+      UnlockState finalState{};
+      {
+        std::lock_guard lock(resultMutex);
+        auto storedState = currentResult.load().state;
+        // An answer from the phone tells more than a timeout or cancel of another connection that finishes later
+        if(serverResult.state == UnlockState::SUCCESS || (IsPhoneAnswer(serverResult.state) && storedState != UnlockState::SUCCESS))
+          currentResult.store(serverResult);
+        // The second Bluetooth client must not replace what the first one found
+        else if(!connection->isOtherClient() && storedState != UnlockState::SUCCESS && !IsPhoneAnswer(storedState))
+          currentResult.store(serverResult);
+        isLast = completed.fetch_add(1) + 1 == numServers;
+        storedState = currentResult.load().state;
+        if(isLast && storedState != UnlockState::SUCCESS) {
+          if(storedState == UnlockState::UNKNOWN)
+            currentResult.store(serverResult);
+          isFinalResult = true;
+        }
+        finalState = currentResult.load().state;
       }
       if(isFinalResult) {
         try {
-          PrintStatus(UnlockStateUtils::ToString(serverResult.state));
+          PrintStatus(UnlockStateUtils::ToString(finalState));
         } catch(const std::exception &ex) {
           spdlog::error("Failed printing unlock status: {}", ex.what());
         }
