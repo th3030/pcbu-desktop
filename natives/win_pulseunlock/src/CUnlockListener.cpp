@@ -178,7 +178,7 @@ void CUnlockListener::Listen(ListenContext &context) {
     return;
 
   auto handler = UnlockHandler(printMessage);
-  auto result = handler.GetResult(userDomainStr, "Windows-Login", {}, &context.state->isRunning);
+  auto result = handler.GetResult(userDomainStr, "Windows-Login", {}, &context.state->isRunning, context.ignoreWaitKeyPress);
   unlockLock.unlock();
 
   const auto sequence = credential->SetUnlockData(result, &isRunning);

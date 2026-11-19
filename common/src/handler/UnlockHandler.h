@@ -42,7 +42,7 @@ class UnlockHandler {
 public:
   explicit UnlockHandler(const std::function<void(std::string)> &printMessage);
   UnlockResult GetResult(const std::string &authUser, const std::string &authProgram, const std::vector<std::string> &deviceIds = {},
-                         std::atomic<bool> *isRunning = nullptr);
+                         std::atomic<bool> *isRunning = nullptr, bool isRetry = false);
 
 private:
   UnlockResult RunServer(BaseUnlockConnection *connection, UDPUnlockBroadcaster *udpBroadcaster, AtomicUnlockResult *currentResult,

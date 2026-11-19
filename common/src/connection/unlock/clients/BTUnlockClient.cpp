@@ -22,7 +22,6 @@ using TimePoint = std::chrono::steady_clock::time_point;
 bool BTUnlockClient::isAlreadyConnected = false;
 bool BTUnlockClient::otherClientConnectedFirst = false;
 bool BTUnlockClient::hasConnected = false;
-bool BTUnlockClient::delayConnect = false;
 bool BTUnlockClient::successfullConnect = false;
 bool BTUnlockClient::credentialSwitch = false;
 std::string BTUnlockClient::firstClientUsername = "";
@@ -58,8 +57,12 @@ static bool IsChannelBusy(int error) {
 #endif
 }
 
-BTUnlockClient::BTUnlockClient(const std::string &deviceAddress, const PairedDevice &device, const bool &otherClient) : BaseUnlockConnection(device) {
+BTUnlockClient::BTUnlockClient(const std::string &deviceAddress, const PairedDevice &device, const bool &otherClient, bool isRetry,
+                               const std::atomic<bool> *isRequestActive)
+    : BaseUnlockConnection(device) {
   m_DeviceAddress = deviceAddress;
+  m_IsRetry = isRetry;
+  m_IsRequestActive = isRequestActive;
   m_Channel = -1;
   m_ClientSocket = (SOCKET)-1;
   m_IsRunning = false;
@@ -86,28 +89,13 @@ bool BTUnlockClient::Start() {
     secondClientUsername = m_AuthUser;
   }
 
-  if(lastRememberedUsername != "") {
-    if(!m_OtherClient) {
-      if(lastRememberedUsername == firstClientUsername) {
-        credentialSwitch = true;
-        delayConnect = false;
-      } else {
-        credentialSwitch = false;
-        delayConnect = true;
-      }
-    } else {
-      if(lastRememberedUsername == secondClientUsername) {
-        credentialSwitch = true;
-        delayConnect = false;
-      } else {
-        credentialSwitch = false;
-        delayConnect = true;
-      }
-    }
-  }
+  // Returning to the same user is a credential switch and waits longer. A retry connects as fast as the first attempt.
+  auto hasLastUser = !lastRememberedUsername.empty();
+  credentialSwitch = hasLastUser && lastRememberedUsername == m_AuthUser && !m_IsRetry;
+  auto isOtherAccount = hasLastUser && lastRememberedUsername != m_AuthUser && !m_IsRetry;
   WSA_STARTUP
   m_IsRunning = true;
-  if(delayConnect)
+  if(isOtherAccount)
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
   SetPhase(UnlockPhase::CLIENT_CONNECTING);
   m_AcceptThread = std::thread([this]() {
@@ -124,6 +112,7 @@ bool BTUnlockClient::Start() {
 }
 
 void BTUnlockClient::Stop() {
+  m_StopRequested = true;
 
   if(m_ClientSocket != -1 && GetPhase() == UnlockPhase::PHONE_UNLOCKING)
     SocketWrite(m_ClientSocket, "CLOSE", 5);
@@ -132,12 +121,12 @@ void BTUnlockClient::Stop() {
     if(credentialSwitch) {
       if(m_OtherClient) {
         if(!isAlreadyConnected) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(2750));
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
           credentialSwitch = false;
         }
       } else {
         if(!otherClientConnectedFirst) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(2750));
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
           credentialSwitch = false;
         }
       }
@@ -146,7 +135,7 @@ void BTUnlockClient::Stop() {
       auto now = std::chrono::steady_clock::now();
       std::lock_guard<std::mutex> lock(globalTimeMutexLastLogTime);
       if(now - globalLastLogTime < std::chrono::milliseconds(1750) && !hasConnected)
-        std::this_thread::sleep_for(std::chrono::milliseconds(2750));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
   }
 
@@ -169,7 +158,15 @@ UnlockState BTUnlockClient::PollResult() {
   auto it = pairErrors.find(m_DeviceAddress);
   if(it != pairErrors.end() && it->second.time >= m_StartTime)
     return it->second.state;
+  // The second client waits for the channel the first one holds, so not getting it is not a failure
+  if(m_OtherClient && state == UnlockState::CONNECT_ERROR && !m_HasConnected && !m_IsRunning)
+    return UnlockState::CANCELED;
   return state;
+}
+
+// The delays in Stop() keep m_IsRunning set after the request was given up, so that alone can't tell
+bool BTUnlockClient::IsAbandoned() const {
+  return m_StopRequested || (m_IsRequestActive != nullptr && !m_IsRequestActive->load());
 }
 
 bool BTUnlockClient::IsPhoneError(UnlockState state) {
@@ -242,9 +239,10 @@ socketStart:
     m_UnlockState = UnlockState::UNK_ERROR;
     goto threadEnd;
   }
-  std::this_thread::sleep_for(std::chrono::milliseconds(250));
   if(m_OtherClient)
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  if(IsAbandoned())
+    goto threadEnd;
   if(connect(m_ClientSocket, reinterpret_cast<struct sockaddr *>(&address), sizeof(address)) < 0) {
     auto error = SOCKET_LAST_ERROR;
     if(error != SOCKET_ERROR_IN_PROGRESS && error != SOCKET_ERROR_WOULD_BLOCK) {
@@ -257,7 +255,7 @@ socketStart:
     }
   }
   if(credentialSwitch) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(3125));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     credentialSwitch = false;
   }
 #ifdef WINDOWS
@@ -307,6 +305,10 @@ socketStart:
     goto threadEnd;
   }
 
+  // A connection that completes after the tile was left must not send that tile's user to the phone
+  if(IsAbandoned())
+    goto threadEnd;
+
   if(successfullConnect) {
     m_UnlockState = UnlockState::CANCELED;
     goto threadEnd;
@@ -334,6 +336,7 @@ socketStart:
     lastRememberedUsername = secondClientUsername;
   }
   hasConnected = true;
+  m_HasConnected = true;
   spdlog::info("Connection established!");
   {
     SocketStream stream(m_ClientSocket, &m_IsRunning, settings.clientSocketTimeout);
